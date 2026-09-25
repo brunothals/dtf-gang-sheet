@@ -98,6 +98,16 @@ body {
   opacity: 0.55;
 }
 
+.dpi-readout {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--ok);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .checkbox {
   display: flex;
   align-items: center;

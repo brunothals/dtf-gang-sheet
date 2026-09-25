@@ -23,7 +23,16 @@ export interface SheetConfig {
    * group_rows / group_cols = agrupar por arte em fileiras/colunas (recorte com tesoura).
    */
   packMode: PackMode
+  /**
+   * DPI usado quando useNativeDpi=false (forçar DPI avançado).
+   * Com qualidade nativa, o DPI efetivo vem das artes importadas.
+   */
   dpi: number
+  /**
+   * Se true (padrão), empacota e exporta no DPI nativo das PNGs
+   * (sem reduzir qualidade). Se false, usa `dpi` forçado.
+   */
+  useNativeDpi: boolean
   maxSideCm: number
   /** Cortar bordas transparentes (alpha bbox) */
   trimEnabled: boolean
@@ -88,6 +97,7 @@ export const DEFAULT_CONFIG: SheetConfig = {
   allowRotation: false,
   packMode: 'maxrects',
   dpi: 300,
+  useNativeDpi: true,
   maxSideCm: 5,
   trimEnabled: true,
   alphaThreshold: 8,

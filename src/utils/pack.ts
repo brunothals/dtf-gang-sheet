@@ -8,6 +8,9 @@ import type {
 } from '../types'
 import { cmToPx, computePrintSizeCm, mmToPx, roundPx } from './units'
 
+/** Lado máximo do preview na UI (px) — exportação usa resolução nativa. */
+const PREVIEW_MAX_SIDE = 1400
+
 export interface ArtPrintSize {
   artId: string
   name: string
@@ -78,6 +81,32 @@ export interface PackArtsOptions {
   skipPreview?: boolean
 }
 
+function buildPreviewUrl(
+  sheetW: number,
+  sheetH: number,
+  placements: PackedPlacement[],
+): string {
+  try {
+    const scale = Math.min(1, PREVIEW_MAX_SIDE / sheetW, PREVIEW_MAX_SIDE / sheetH)
+    if (scale < 1) {
+      const pw = Math.max(1, Math.round(sheetW * scale))
+      const ph = Math.max(1, Math.round(sheetH * scale))
+      const scaled = placements.map((p) => ({
+        ...p,
+        x: p.x * scale,
+        y: p.y * scale,
+        width: Math.max(1, p.width * scale),
+        height: Math.max(1, p.height * scale),
+      }))
+      return renderSheetCanvas(pw, ph, scaled).toDataURL('image/png')
+    }
+    return renderSheetCanvas(sheetW, sheetH, placements).toDataURL('image/png')
+  } catch {
+    // Folha enorme / limite do browser — preview vazio; export usa tiles
+    return ''
+  }
+}
+
 function finalizeSheet(
   sheetW: number,
   sheetH: number,
@@ -86,11 +115,7 @@ function finalizeSheet(
   sheets: PackedSheet[],
 ): void {
   if (placements.length === 0) return
-  let previewUrl = ''
-  if (!skipPreview) {
-    const canvas = renderSheetCanvas(sheetW, sheetH, placements)
-    previewUrl = canvas.toDataURL('image/png')
-  }
+  const previewUrl = skipPreview ? '' : buildPreviewUrl(sheetW, sheetH, placements)
   sheets.push({
     index: sheets.length,
     widthPx: sheetW,
@@ -314,6 +339,27 @@ export function packArts(
   return { sheets, errors, printSizes }
 }
 
+/** Aplica smoothing só quando há reamostragem; 1:1 fica nítido. */
+function applyDrawSmoothing(
+  ctx: CanvasRenderingContext2D,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+): void {
+  const exact = srcW === dstW && srcH === dstH
+  if (exact) {
+    ctx.imageSmoothingEnabled = false
+    return
+  }
+  ctx.imageSmoothingEnabled = true
+  try {
+    ctx.imageSmoothingQuality = 'high'
+  } catch {
+    /* Safari antigo */
+  }
+}
+
 export function renderSheetCanvas(
   widthPx: number,
   heightPx: number,
@@ -322,7 +368,7 @@ export function renderSheetCanvas(
   const canvas = document.createElement('canvas')
   canvas.width = widthPx
   canvas.height = heightPx
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { alpha: true })
   if (!ctx) throw new Error('Canvas 2D indisponível')
   ctx.clearRect(0, 0, widthPx, heightPx)
 
@@ -330,11 +376,51 @@ export function renderSheetCanvas(
     ctx.save()
     if (p.rotated) {
       // Rotação 90° horário: origem no canto, depois translate
+      // drawImage destino pré-rotação: (p.height × p.width) ← source (w × h)
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.height, p.width)
       ctx.translate(p.x + p.width, p.y)
       ctx.rotate(Math.PI / 2)
       ctx.drawImage(p.source, 0, 0, p.height, p.width)
     } else {
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.width, p.height)
       ctx.drawImage(p.source, p.x, p.y, p.width, p.height)
+    }
+    ctx.restore()
+  }
+
+  return canvas
+}
+
+/**
+ * Desenha só as peças que intersectam a faixa [clipY, clipY+clipH) no canvas
+ * de destino (largura = sheetW, altura = clipH). Coordenadas Y locais = sheetY − clipY.
+ */
+export function renderSheetStrip(
+  sheetW: number,
+  clipY: number,
+  clipH: number,
+  placements: PackedPlacement[],
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = sheetW
+  canvas.height = clipH
+  const ctx = canvas.getContext('2d', { alpha: true })
+  if (!ctx) throw new Error('Canvas 2D indisponível')
+  ctx.clearRect(0, 0, sheetW, clipH)
+
+  const clipBottom = clipY + clipH
+
+  for (const p of placements) {
+    if (p.y + p.height <= clipY || p.y >= clipBottom) continue
+    ctx.save()
+    if (p.rotated) {
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.height, p.width)
+      ctx.translate(p.x + p.width, p.y - clipY)
+      ctx.rotate(Math.PI / 2)
+      ctx.drawImage(p.source, 0, 0, p.height, p.width)
+    } else {
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.width, p.height)
+      ctx.drawImage(p.source, p.x, p.y - clipY, p.width, p.height)
     }
     ctx.restore()
   }

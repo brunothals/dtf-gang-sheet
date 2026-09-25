@@ -15,6 +15,7 @@ import {
   maxQtyOneArtOnOneSheet,
 } from './utils/fillSheet'
 import { downloadAllSheetsZip, downloadSheetPng } from './utils/exportPng'
+import { computeNativeExportDpi, resolveExportDpi } from './utils/units'
 import './App.css'
 
 function uid(): string {
@@ -329,12 +330,29 @@ export default function App({ onLogout }: AppProps) {
     }, 'image/png')
   }
 
+  /** DPI efetivo: nativo das PNGs (padrão) ou forçado. */
+  const effectiveDpi = useMemo(
+    () => resolveExportDpi(arts, config),
+    [arts, config],
+  )
+
+  const nativeDpi = useMemo(
+    () => computeNativeExportDpi(arts, config),
+    [arts, config],
+  )
+
+  /** Config usada no packing/export — dpi = efetivo. */
+  const packConfig = useMemo(
+    () => ({ ...config, dpi: effectiveDpi }),
+    [config, effectiveDpi],
+  )
+
   const artRows = useMemo(() => {
     return arts.map((art) => {
-      const ps = getArtPrintSize(art, config)
+      const ps = getArtPrintSize(art, packConfig)
       return { art, ps }
     })
-  }, [arts, config])
+  }, [arts, packConfig])
 
   // Empacotar quando artes ou config mudam
   useEffect(() => {
@@ -343,15 +361,19 @@ export default function App({ onLogout }: AppProps) {
       setPackErrors([])
       return
     }
-    const { sheets: packed, errors } = packArts(arts, config)
+    const { sheets: packed, errors } = packArts(arts, packConfig)
     setSheets(packed)
     setPackErrors(errors)
-  }, [arts, config])
+  }, [arts, packConfig])
 
   const handleExportOne = async (sheet: PackedSheet) => {
     setExporting(true)
+    setStatus(`Exportando folha ${sheet.index + 1} em ~${effectiveDpi} DPI (qualidade do PNG)…`)
     try {
-      await downloadSheetPng(sheet, config.dpi, `folha-${sheet.index + 1}.png`)
+      await downloadSheetPng(sheet, effectiveDpi, `folha-${sheet.index + 1}.png`)
+      setStatus(`Folha ${sheet.index + 1} exportada (~${effectiveDpi} DPI).`)
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : 'Erro ao exportar PNG.')
     } finally {
       setExporting(false)
     }
@@ -360,12 +382,16 @@ export default function App({ onLogout }: AppProps) {
   const handleExportAll = async () => {
     if (sheets.length === 0) return
     setExporting(true)
+    setStatus(`Exportando ${sheets.length} folha(s) em ~${effectiveDpi} DPI…`)
     try {
       if (sheets.length === 1) {
-        await downloadSheetPng(sheets[0], config.dpi)
+        await downloadSheetPng(sheets[0], effectiveDpi)
       } else {
-        await downloadAllSheetsZip(sheets, config.dpi)
+        await downloadAllSheetsZip(sheets, effectiveDpi)
       }
+      setStatus(`Exportação concluída (~${effectiveDpi} DPI).`)
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : 'Erro ao exportar.')
     } finally {
       setExporting(false)
     }
@@ -404,18 +430,42 @@ export default function App({ onLogout }: AppProps) {
               </select>
             </label>
 
+            <div className="field">
+              <span>Exportação</span>
+              <div className="dpi-readout" title="A folha é montada e exportada na densidade das PNGs importadas — sem reduzir qualidade">
+                {config.useNativeDpi
+                  ? `~${effectiveDpi} DPI (nativo das artes)`
+                  : `${effectiveDpi} DPI (forçado)`}
+              </div>
+            </div>
+          </div>
+
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={config.useNativeDpi}
+              onChange={(e) => updateConfig('useNativeDpi', e.target.checked)}
+            />
+            <span>Qualidade do PNG importado (recomendado)</span>
+          </label>
+          <p className="hint">
+            Exporta na mesma resolução das artes (sem pedir para reduzir qualidade), mesmo em
+            folhas grandes. DPI nativo calculado: ~{nativeDpi}.
+          </p>
+
+          {!config.useNativeDpi && (
             <label className="field">
-              <span>DPI</span>
+              <span>Forçar DPI (avançado)</span>
               <input
                 type="number"
                 min={72}
-                max={600}
+                max={2400}
                 step={1}
                 value={config.dpi}
                 onChange={(e) => updateConfig('dpi', Number(e.target.value) || 300)}
               />
             </label>
-          </div>
+          )}
 
           <div className="grid-2">
             <label className="field">
@@ -792,7 +842,7 @@ export default function App({ onLogout }: AppProps) {
                   <div className="sheet-meta">
                     <strong>Folha {sheet.index + 1}</strong>
                     <span>
-                      {config.widthCm} × {config.heightCm} cm · {sheet.placements.length} peça(s)
+                      {config.widthCm} × {config.heightCm} cm · {sheet.placements.length} peça(s) · ~{effectiveDpi} DPI
                     </span>
                     <button
                       type="button"
@@ -814,7 +864,7 @@ export default function App({ onLogout }: AppProps) {
       </main>
 
       <footer className="footer">
-        Processamento 100% no navegador · MaxRects / Agrupar por arte · DPI embutido (pHYs)
+        Processamento 100% no navegador · Qualidade nativa do PNG · DPI embutido (pHYs)
       </footer>
     </div>
   )
