@@ -471,6 +471,41 @@ export default function App({ onLogout }: AppProps) {
             </label>
           </div>
 
+          <fieldset className="pack-mode">
+            <legend>Modo de montagem</legend>
+            <label className="radio">
+              <input
+                type="radio"
+                name="packMode"
+                checked={config.packMode === 'maxrects'}
+                onChange={() => updateConfig('packMode', 'maxrects')}
+              />
+              <span>Aproveitar espaço</span>
+            </label>
+            <label className="radio">
+              <input
+                type="radio"
+                name="packMode"
+                checked={config.packMode === 'group_rows'}
+                onChange={() => updateConfig('packMode', 'group_rows')}
+              />
+              <span>Agrupar por arte — fileiras</span>
+            </label>
+            <label className="radio">
+              <input
+                type="radio"
+                name="packMode"
+                checked={config.packMode === 'group_cols'}
+                onChange={() => updateConfig('packMode', 'group_cols')}
+              />
+              <span>Agrupar por arte — colunas</span>
+            </label>
+            <p className="hint">
+              Fileiras/colunas mantêm a mesma arte junta para facilitar o recorte com
+              tesoura. &quot;Aproveitar espaço&quot; usa MaxRects e pode misturar artes.
+            </p>
+          </fieldset>
+
           <div className="grid-2">
             <label className="field">
               <span>Lado maior (cm)</span>
@@ -779,7 +814,7 @@ export default function App({ onLogout }: AppProps) {
       </main>
 
       <footer className="footer">
-        Processamento 100% no navegador · MaxRects · DPI embutido (pHYs)
+        Processamento 100% no navegador · MaxRects / Agrupar por arte · DPI embutido (pHYs)
       </footer>
     </div>
   )

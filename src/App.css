@@ -107,6 +107,32 @@ body {
   cursor: pointer;
 }
 
+.pack-mode {
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.65rem 0.75rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.pack-mode legend {
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.pack-mode .radio {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.pack-mode .hint {
+  margin-top: 0.45rem;
+}
+
 .hint {
   margin: 0.35rem 0 0;
   font-size: 0.8rem;

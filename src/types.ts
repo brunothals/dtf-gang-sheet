@@ -5,6 +5,9 @@ export interface SheetPreset {
   heightCm: number
 }
 
+/** Modo de montagem das peças na folha. */
+export type PackMode = 'maxrects' | 'group_rows' | 'group_cols'
+
 export interface SheetConfig {
   widthCm: number
   heightCm: number
@@ -15,6 +18,11 @@ export interface SheetConfig {
    * rotation is per-art via ArtItem.rotate90.
    */
   allowRotation: boolean
+  /**
+   * maxrects = aproveitar espaço (MaxRects, pode misturar artes).
+   * group_rows / group_cols = agrupar por arte em fileiras/colunas (recorte com tesoura).
+   */
+  packMode: PackMode
   dpi: number
   maxSideCm: number
   /** Cortar bordas transparentes (alpha bbox) */
@@ -78,6 +86,7 @@ export const DEFAULT_CONFIG: SheetConfig = {
   marginMm: 5,
   gapMm: 3,
   allowRotation: false,
+  packMode: 'maxrects',
   dpi: 300,
   maxSideCm: 5,
   trimEnabled: true,
