@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import App from '../App'
+import Shell from '../shell/Shell'
 import { AUTH_SESSION_KEY } from './credentials'
 import LoginScreen from './LoginScreen'
 
@@ -27,5 +27,5 @@ export default function AuthGate() {
     return <LoginScreen onSuccess={() => setAuthed(true)} />
   }
 
-  return <App onLogout={handleLogout} />
+  return <Shell onLogout={handleLogout} />
 }

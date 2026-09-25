@@ -1,0 +1,54 @@
+.shell-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 0;
+  flex-wrap: wrap;
+}
+
+.shell-tabs-inner {
+  display: inline-flex;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.shell-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.shell-tab:hover {
+  color: var(--text);
+}
+
+.shell-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.shell-logout {
+  margin-left: auto;
+}
+
+.shell-loading {
+  max-width: 1280px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: var(--muted);
+}
+
