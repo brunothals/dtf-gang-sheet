@@ -54,7 +54,11 @@ function formatPxSize(w: number, h: number): string {
   return `${w}×${h}`
 }
 
-export default function App() {
+type AppProps = {
+  onLogout?: () => void
+}
+
+export default function App({ onLogout }: AppProps) {
   const [config, setConfig] = useState<SheetConfig>({ ...DEFAULT_CONFIG })
   const [presetId, setPresetId] = useState('29x42')
   const [arts, setArts] = useState<ArtItem[]>([])
@@ -376,6 +380,11 @@ export default function App() {
             Empacote artes PNG localmente (Mercado Livre / DTF UV). Nada é enviado ao servidor.
           </p>
         </div>
+        {onLogout && (
+          <button type="button" className="btn sm logout-btn" onClick={onLogout} title="Encerrar sessão">
+            Sair
+          </button>
+        )}
       </header>
 
       <main className="layout">
