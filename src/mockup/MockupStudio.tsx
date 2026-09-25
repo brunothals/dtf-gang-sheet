@@ -9,6 +9,7 @@ import {
   ART_SIZE_PRESETS,
   CERAMIC_COLOR_PRESETS,
   GLASS_TINT_PRESETS,
+  METAL_COLOR_PRESETS,
   type ProductId,
   type ArtSizeCm,
   getProduct,
@@ -134,8 +135,8 @@ export default function MockupStudio({ onLogout }: Props) {
   const patchArtSize = (partial: Partial<ArtSizeCm>) => {
     setArtSizeCm((s) => {
       const next = {
-        width: Math.max(0.5, Math.min(20, partial.width ?? s.width)),
-        height: Math.max(0.5, Math.min(20, partial.height ?? s.height)),
+        width: Math.max(0.5, Math.min(25, partial.width ?? s.width)),
+        height: Math.max(0.5, Math.min(25, partial.height ?? s.height)),
       }
       setSizePresetId(presetIdForSize(next))
       return next
@@ -185,6 +186,7 @@ export default function MockupStudio({ onLogout }: Props) {
 
   const isGlass = product.material === 'glass'
   const isCeramic = product.material === 'porcelain'
+  const isMetal = product.material === 'metal'
 
   return (
     <div className="mockup-studio" onPaste={onPaste}>
@@ -207,7 +209,7 @@ export default function MockupStudio({ onLogout }: Props) {
         <aside className="mockup-sidebar">
           <section className="card">
             <h2>Produto</h2>
-            <div className="product-grid product-grid-3">
+            <div className="product-grid product-grid-6">
               {PRODUCTS.map((p) => (
                 <button
                   key={p.id}
@@ -302,7 +304,7 @@ export default function MockupStudio({ onLogout }: Props) {
                 <input
                   type="number"
                   min={0.5}
-                  max={20}
+                  max={25}
                   step={0.1}
                   value={artSizeCm.width}
                   onChange={(e) => patchArtSize({ width: Number(e.target.value) })}
@@ -313,7 +315,7 @@ export default function MockupStudio({ onLogout }: Props) {
                 <input
                   type="number"
                   min={0.5}
-                  max={20}
+                  max={25}
                   step={0.1}
                   value={artSizeCm.height}
                   onChange={(e) => patchArtSize({ height: Number(e.target.value) })}
@@ -381,6 +383,34 @@ export default function MockupStudio({ onLogout }: Props) {
                       style={{ background: p.hex }}
                       title={p.label}
                       onClick={() => applyCeramicPreset(p.hex)}
+                    />
+                  ))}
+                </div>
+                <div className="grid-2">
+                  {product.colorParts.map((part) => (
+                    <label key={part.id} className="field">
+                      <span>{part.label}</span>
+                      <input
+                        type="color"
+                        value={colors[part.id] ?? part.default}
+                        onChange={(e) => setPartColor(part.id, e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+            {isMetal && (
+              <>
+                <div className="preset-row">
+                  {METAL_COLOR_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`color-swatch ${colors.body === p.hex ? 'active' : ''}`}
+                      style={{ background: p.hex }}
+                      title={p.label}
+                      onClick={() => setPartColor('body', p.hex)}
                     />
                   ))}
                 </div>
