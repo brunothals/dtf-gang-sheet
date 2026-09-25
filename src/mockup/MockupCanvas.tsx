@@ -1,30 +1,35 @@
 import { useEffect, useImperativeHandle, useRef, forwardRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import type { ProductId } from './products'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import type { ProductId, ArtSizeCm } from './products'
 import { getProduct } from './products'
 
+/** 1 unidade Three.js = 1 cm */
 export type ArtTransform = {
-  scale: number
-  offsetX: number
-  offsetY: number
+  /** Deslocamento horizontal em cm (positivo = direita do produto) */
+  offsetXCm: number
+  /** Deslocamento vertical em cm (positivo = sobe) */
+  offsetYCm: number
   rotationDeg: number
   flipH: boolean
   flipV: boolean
 }
 
 export type MockupCanvasHandle = {
-  /** Render at given pixel size and return PNG data URL (or null) */
   capture: (width: number, height: number) => string | null
   setViewAngle: (angle: 'frente' | 'tresquartos') => void
 }
 
 type Props = {
   productId: ProductId
-  productColor: string
+  colors: Record<string, string>
   backgroundColor: string
   artImage: HTMLImageElement | null
+  artSizeCm: ArtSizeCm
   transform: ArtTransform
+  showGuide?: boolean
+  frosting?: number
   className?: string
 }
 
@@ -33,44 +38,29 @@ const TEX_SIZE = 1024
 function bakeArtTexture(
   art: HTMLImageElement | null,
   transform: ArtTransform,
-  aspectW: number,
-  aspectH: number,
 ): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  // Match print-area aspect so UV mapping looks correct
-  const maxSide = TEX_SIZE
-  if (aspectW >= aspectH) {
-    canvas.width = maxSide
-    canvas.height = Math.max(64, Math.round(maxSide * (aspectH / aspectW)))
-  } else {
-    canvas.height = maxSide
-    canvas.width = Math.max(64, Math.round(maxSide * (aspectW / aspectH)))
-  }
+  canvas.width = TEX_SIZE
+  canvas.height = TEX_SIZE
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-
+  ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE)
   if (!art) return canvas
 
-  const cx = canvas.width / 2
-  const cy = canvas.height / 2
+  const cx = TEX_SIZE / 2
+  const cy = TEX_SIZE / 2
   ctx.save()
-  ctx.translate(cx + transform.offsetX * (canvas.width / 2), cy + transform.offsetY * (canvas.height / 2))
+  ctx.translate(cx, cy)
   ctx.rotate((transform.rotationDeg * Math.PI) / 180)
-  ctx.scale(
-    (transform.flipH ? -1 : 1) * transform.scale,
-    (transform.flipV ? -1 : 1) * transform.scale,
-  )
+  ctx.scale(transform.flipH ? -1 : 1, transform.flipV ? -1 : 1)
 
-  // Fit art inside canvas while preserving aspect
-  const artAspect = art.naturalWidth / art.naturalHeight
-  const boxAspect = canvas.width / canvas.height
+  const artAspect = art.naturalWidth / Math.max(art.naturalHeight, 1)
   let dw: number
   let dh: number
-  if (artAspect > boxAspect) {
-    dw = canvas.width * 0.85
+  if (artAspect >= 1) {
+    dw = TEX_SIZE * 0.92
     dh = dw / artAspect
   } else {
-    dh = canvas.height * 0.85
+    dh = TEX_SIZE * 0.92
     dw = dh * artAspect
   }
   ctx.drawImage(art, -dw / 2, -dh / 2, dw, dh)
@@ -94,232 +84,342 @@ function disposeObject(obj: THREE.Object3D) {
   })
 }
 
-function materialFor(
-  productId: ProductId,
-  color: string,
-  opts: { map?: THREE.Texture | null; transparent?: boolean; opacity?: number; roughness?: number; metalness?: number } = {},
-): THREE.MeshStandardMaterial {
-  const product = getProduct(productId)
-  let roughness = 0.45
-  let metalness = 0.05
-  if (product.material === 'porcelain') {
-    roughness = 0.35
-    metalness = 0.02
-  } else if (product.material === 'plastic') {
-    roughness = 0.55
-    metalness = 0.08
-  } else if (product.material === 'glass') {
-    roughness = 0.12
-    metalness = 0.15
-  }
-  return new THREE.MeshStandardMaterial({
+function porcelainMaterial(color: string, opts: { map?: THREE.Texture | null; roughness?: number } = {}) {
+  return new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(color),
-    roughness: opts.roughness ?? roughness,
-    metalness: opts.metalness ?? metalness,
+    roughness: opts.roughness ?? 0.28,
+    metalness: 0.0,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.18,
     map: opts.map ?? null,
-    transparent: opts.transparent ?? !!opts.map,
-    opacity: opts.opacity ?? 1,
     side: THREE.FrontSide,
   })
 }
 
-function buildProduct(
-  productId: ProductId,
-  productColor: string,
-  artTex: THREE.CanvasTexture | null,
-): THREE.Group {
+function glassMaterial(tint: string, frosting: number) {
+  const c = new THREE.Color(tint)
+  const rough = 0.04 + frosting * 0.55
+  return new THREE.MeshPhysicalMaterial({
+    color: c,
+    roughness: rough,
+    metalness: 0,
+    transmission: Math.max(0.05, 0.92 - frosting * 0.7),
+    thickness: 0.45,
+    ior: 1.5,
+    transparent: true,
+    opacity: 1,
+    attenuationColor: c,
+    attenuationDistance: 2.5,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+}
+
+/** Copo americano Nadir-like: ridges/bands, slight taper, thick glass feel */
+function buildCopoAmericano(colors: Record<string, string>, frosting: number): THREE.Group {
   const group = new THREE.Group()
+  const tint = colors.glass ?? '#e8f4fc'
+  const mat = glassMaterial(tint, frosting)
 
-  if (productId === 'prato') {
-    // Flat plate with raised rim
-    const radius = 1.35
-    const bodyGeo = new THREE.CylinderGeometry(radius * 0.92, radius, 0.08, 64)
-    const bodyMat = materialFor(productId, productColor, { roughness: 0.32 })
-    const body = new THREE.Mesh(bodyGeo, bodyMat)
-    body.castShadow = true
-    body.receiveShadow = true
-    group.add(body)
+  // Profile: x = radius (cm), y = height from bottom (cm)
+  // Ø 6.7 → r≈3.35; H 9.3; characteristic mid ridges
+  const outer: THREE.Vector2[] = [
+    new THREE.Vector2(0.01, 0.0),
+    new THREE.Vector2(2.95, 0.0),
+    new THREE.Vector2(3.05, 0.15),
+    new THREE.Vector2(3.1, 0.55),
+    new THREE.Vector2(3.12, 1.4),
+    // ridge band 1
+    new THREE.Vector2(3.28, 1.85),
+    new THREE.Vector2(3.14, 2.15),
+    // ridge band 2
+    new THREE.Vector2(3.3, 2.55),
+    new THREE.Vector2(3.15, 2.85),
+    // ridge band 3
+    new THREE.Vector2(3.32, 3.25),
+    new THREE.Vector2(3.18, 3.55),
+    new THREE.Vector2(3.22, 4.5),
+    new THREE.Vector2(3.28, 6.2),
+    new THREE.Vector2(3.32, 8.2),
+    new THREE.Vector2(3.35, 9.15),
+    new THREE.Vector2(3.38, 9.3), // rim lip
+    new THREE.Vector2(3.2, 9.3),
+  ]
+  const outerGeo = new THREE.LatheGeometry(outer, 96)
+  const outerMesh = new THREE.Mesh(outerGeo, mat)
+  outerMesh.castShadow = true
+  outerMesh.receiveShadow = true
+  group.add(outerMesh)
 
-    const rimGeo = new THREE.TorusGeometry(radius * 0.96, 0.06, 16, 64)
-    const rim = new THREE.Mesh(rimGeo, bodyMat.clone())
-    rim.rotation.x = Math.PI / 2
-    rim.position.y = 0.05
-    rim.castShadow = true
-    group.add(rim)
+  // Inner wall (hollow look)
+  const wall = 0.18
+  const inner: THREE.Vector2[] = [
+    new THREE.Vector2(3.2 - wall, 9.25),
+    new THREE.Vector2(3.12 - wall, 8.0),
+    new THREE.Vector2(3.05 - wall, 4.5),
+    new THREE.Vector2(2.95 - wall, 1.5),
+    new THREE.Vector2(2.85 - wall, 0.35),
+    new THREE.Vector2(0.01, 0.28),
+  ]
+  const innerMat = glassMaterial(tint, Math.min(1, frosting + 0.05))
+  innerMat.side = THREE.BackSide
+  const innerMesh = new THREE.Mesh(new THREE.LatheGeometry(inner, 64), innerMat)
+  group.add(innerMesh)
 
-    // Art disc on top (slightly above surface)
-    if (artTex) {
-      const artGeo = new THREE.CircleGeometry(radius * 0.72, 64)
-      const artMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: artTex,
-        transparent: true,
-        roughness: 0.4,
-        metalness: 0.02,
-        depthWrite: false,
-      })
-      const artMesh = new THREE.Mesh(artGeo, artMat)
-      artMesh.rotation.x = -Math.PI / 2
-      artMesh.position.y = 0.045
-      artMesh.name = 'printArea'
-      group.add(artMesh)
-    }
-  } else if (productId === 'copo') {
-    const rTop = 0.55
-    const rBot = 0.48
-    const h = 1.35
-    const sideGeo = new THREE.CylinderGeometry(rTop, rBot, h, 64, 1, true)
-    // Remap UVs: full wrap horizontally, vertical use mid band
-    const uv = sideGeo.attributes.uv
-    for (let i = 0; i < uv.count; i++) {
-      const u = uv.getX(i)
-      const v = uv.getY(i)
-      // Keep u; compress v slightly into print band
-      uv.setXY(i, u, 0.15 + v * 0.7)
-    }
-    const bodyMat = materialFor(productId, productColor, { roughness: 0.38 })
-    const solidGeo = new THREE.CylinderGeometry(rTop - 0.01, rBot - 0.01, h - 0.02, 64)
-    const solid = new THREE.Mesh(solidGeo, bodyMat)
-    solid.castShadow = true
-    solid.receiveShadow = true
-    group.add(solid)
+  // Subtle bottom pad for contact shadow contact
+  const foot = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.9, 2.95, 0.08, 48),
+    glassMaterial(tint, frosting + 0.1),
+  )
+  foot.position.y = 0.04
+  foot.castShadow = true
+  group.add(foot)
 
-    if (artTex) {
-      const sideMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: artTex,
-        transparent: true,
-        roughness: 0.38,
-        metalness: 0.02,
-        depthWrite: false,
-      })
-      const side = new THREE.Mesh(sideGeo, sideMat)
-      side.name = 'printArea'
-      side.castShadow = true
-      group.add(side)
-    } else {
-      sideGeo.dispose()
-    }
-
-    // Bottom
-    const bot = new THREE.Mesh(
-      new THREE.CircleGeometry(rBot, 48),
-      bodyMat.clone(),
-    )
-    bot.rotation.x = Math.PI / 2
-    bot.position.y = -h / 2
-    group.add(bot)
-
-    // Rim
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(rTop, 0.025, 12, 48),
-      bodyMat.clone(),
-    )
-    rim.rotation.x = Math.PI / 2
-    rim.position.y = h / 2
-    group.add(rim)
-
-    group.position.y = h / 2
-  } else if (productId === 'tumbler') {
-    const rTop = 0.52
-    const rBot = 0.48
-    const h = 1.9
-    const bodyMat = materialFor(productId, productColor, { roughness: 0.58, metalness: 0.1 })
-    const solidGeo = new THREE.CylinderGeometry(rTop - 0.012, rBot - 0.012, h - 0.02, 64)
-    const solid = new THREE.Mesh(solidGeo, bodyMat)
-    solid.castShadow = true
-    solid.receiveShadow = true
-    group.add(solid)
-
-    const sideGeo = new THREE.CylinderGeometry(rTop, rBot, h, 64, 1, true)
-    if (artTex) {
-      const sideMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: artTex,
-        transparent: true,
-        roughness: 0.55,
-        metalness: 0.08,
-        depthWrite: false,
-      })
-      const side = new THREE.Mesh(sideGeo, sideMat)
-      side.name = 'printArea'
-      group.add(side)
-    } else {
-      sideGeo.dispose()
-    }
-
-    const lid = new THREE.Mesh(
-      new THREE.CylinderGeometry(rTop * 0.95, rTop * 0.98, 0.12, 48),
-      materialFor(productId, '#333333', { roughness: 0.4 }),
-    )
-    lid.position.y = h / 2 + 0.02
-    group.add(lid)
-
-    const bot = new THREE.Mesh(new THREE.CircleGeometry(rBot, 48), bodyMat.clone())
-    bot.rotation.x = Math.PI / 2
-    bot.position.y = -h / 2
-    group.add(bot)
-
-    group.position.y = h / 2
-  } else {
-    // Taça — lathe bowl + stem + print band
-    const pts: THREE.Vector2[] = []
-    // Bowl profile (x=radius, y=height)
-    pts.push(new THREE.Vector2(0.02, 0))
-    pts.push(new THREE.Vector2(0.06, 0.35)) // stem
-    pts.push(new THREE.Vector2(0.08, 0.55))
-    pts.push(new THREE.Vector2(0.22, 0.62)) // bowl start
-    pts.push(new THREE.Vector2(0.55, 0.95))
-    pts.push(new THREE.Vector2(0.62, 1.25))
-    pts.push(new THREE.Vector2(0.58, 1.45)) // rim
-    const latheGeo = new THREE.LatheGeometry(pts, 64)
-    const glassMat = materialFor(productId, productColor, {
-      roughness: 0.1,
-      metalness: 0.2,
-      transparent: true,
-      opacity: 0.55,
-    })
-    glassMat.side = THREE.DoubleSide
-    const glass = new THREE.Mesh(latheGeo, glassMat)
-    glass.castShadow = true
-    group.add(glass)
-
-    // Frosted print band around bowl
-    const bandH = 0.55
-    const bandY = 1.0
-    const bandR = 0.58
-    const bandGeo = new THREE.CylinderGeometry(bandR, bandR * 0.92, bandH, 64, 1, true)
-    if (artTex) {
-      const bandMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: artTex,
-        transparent: true,
-        roughness: 0.45,
-        metalness: 0.05,
-        side: THREE.DoubleSide,
-      })
-      const band = new THREE.Mesh(bandGeo, bandMat)
-      band.position.y = bandY
-      band.name = 'printArea'
-      group.add(band)
-    } else {
-      bandGeo.dispose()
-    }
-
-    // Base disc
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.3, 0.05, 48),
-      materialFor(productId, productColor, { roughness: 0.15, metalness: 0.25, opacity: 0.7, transparent: true }),
-    )
-    base.position.y = 0.025
-    group.add(base)
-  }
-
+  group.userData.printRadius = 3.25
+  group.userData.printCenterY = 5.2
+  group.userData.targetY = 4.65
   return group
 }
 
+/** Xícara cerâmica ~325 ml with handle */
+function buildXicara(colors: Record<string, string>): THREE.Group {
+  const group = new THREE.Group()
+  const bodyCol = colors.body ?? '#f7f4ef'
+  const handleCol = colors.handle ?? bodyCol
+  const interiorCol = colors.interior ?? '#ffffff'
+
+  const bodyMat = porcelainMaterial(bodyCol)
+  const handleMat = porcelainMaterial(handleCol, { roughness: 0.32 })
+  const interiorMat = porcelainMaterial(interiorCol, { roughness: 0.4 })
+
+  // Outer body profile (cm): Ø≈8.2 → r≈4.1; H≈9.5
+  const outer: THREE.Vector2[] = [
+    new THREE.Vector2(0.01, 0.0),
+    new THREE.Vector2(3.4, 0.0),
+    new THREE.Vector2(3.55, 0.2),
+    new THREE.Vector2(3.65, 0.7),
+    new THREE.Vector2(3.8, 2.5),
+    new THREE.Vector2(3.95, 5.0),
+    new THREE.Vector2(4.05, 7.5),
+    new THREE.Vector2(4.1, 9.2),
+    new THREE.Vector2(4.15, 9.5), // rim
+    new THREE.Vector2(3.95, 9.5),
+  ]
+  const body = new THREE.Mesh(new THREE.LatheGeometry(outer, 96), bodyMat)
+  body.castShadow = true
+  body.receiveShadow = true
+  group.add(body)
+
+  // Interior well
+  const wall = 0.28
+  const inner: THREE.Vector2[] = [
+    new THREE.Vector2(3.95 - wall, 9.45),
+    new THREE.Vector2(3.85 - wall, 7.0),
+    new THREE.Vector2(3.6 - wall, 3.0),
+    new THREE.Vector2(3.35 - wall, 0.55),
+    new THREE.Vector2(0.01, 0.45),
+  ]
+  const interior = new THREE.Mesh(new THREE.LatheGeometry(inner, 64), interiorMat)
+  group.add(interior)
+
+  // Handle — tube along a C-curve on +X side
+  const handleCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(3.9, 7.4, 0),
+    new THREE.Vector3(5.4, 7.6, 0),
+    new THREE.Vector3(6.1, 5.8, 0),
+    new THREE.Vector3(5.9, 3.6, 0),
+    new THREE.Vector3(5.2, 2.4, 0),
+    new THREE.Vector3(3.85, 2.6, 0),
+  ])
+  const handleGeo = new THREE.TubeGeometry(handleCurve, 64, 0.42, 16, false)
+  const handle = new THREE.Mesh(handleGeo, handleMat)
+  handle.castShadow = true
+  group.add(handle)
+
+  // Handle end caps (soft blend into body)
+  for (const t of [0, 1]) {
+    const p = handleCurve.getPoint(t)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 12), handleMat)
+    cap.position.copy(p)
+    group.add(cap)
+  }
+
+  group.userData.printRadius = 4.0
+  group.userData.printCenterY = 5.0
+  group.userData.targetY = 4.75
+  return group
+}
+
+/** Ceramic plate with rim lip + slight concavity */
+function buildPrato(colors: Record<string, string>): THREE.Group {
+  const group = new THREE.Group()
+  const plateCol = colors.plate ?? '#f5f0e8'
+  const rimCol = colors.rim ?? plateCol
+  const plateMat = porcelainMaterial(plateCol, { roughness: 0.3 })
+  const rimMat = porcelainMaterial(rimCol, { roughness: 0.28 })
+
+  // Cross-section: Ø 22 cm → r=11. Foot + well + rim.
+  const profile: THREE.Vector2[] = [
+    new THREE.Vector2(0.01, 0.55), // well center
+    new THREE.Vector2(4.5, 0.52),
+    new THREE.Vector2(7.0, 0.55),
+    new THREE.Vector2(8.2, 0.75), // rise to rim
+    new THREE.Vector2(9.2, 1.35),
+    new THREE.Vector2(10.2, 1.85),
+    new THREE.Vector2(10.8, 2.05), // rim top
+    new THREE.Vector2(11.0, 1.95), // outer lip
+    new THREE.Vector2(10.95, 1.55),
+    new THREE.Vector2(10.5, 1.0),
+    new THREE.Vector2(9.0, 0.45),
+    new THREE.Vector2(7.5, 0.2), // underside
+    new THREE.Vector2(5.5, 0.12),
+    new THREE.Vector2(4.0, 0.25), // foot ring start
+    new THREE.Vector2(3.6, 0.55),
+    new THREE.Vector2(3.5, 0.15),
+    new THREE.Vector2(0.01, 0.12),
+  ]
+  const body = new THREE.Mesh(new THREE.LatheGeometry(profile, 128), plateMat)
+  body.castShadow = true
+  body.receiveShadow = true
+  group.add(body)
+
+  // Slightly raised rim accent (optional separate color)
+  if (rimCol.toLowerCase() !== plateCol.toLowerCase()) {
+    const rimProfile: THREE.Vector2[] = [
+      new THREE.Vector2(9.4, 1.55),
+      new THREE.Vector2(10.3, 1.95),
+      new THREE.Vector2(10.85, 2.08),
+      new THREE.Vector2(11.0, 1.98),
+      new THREE.Vector2(10.7, 1.7),
+      new THREE.Vector2(9.6, 1.4),
+    ]
+    const rim = new THREE.Mesh(new THREE.LatheGeometry(rimProfile, 96), rimMat)
+    rim.castShadow = true
+    group.add(rim)
+  }
+
+  group.userData.printRadius = 0 // flat
+  group.userData.printCenterY = 0.85
+  group.userData.targetY = 1.1
+  group.userData.isFlat = true
+  return group
+}
+
+function buildProduct(productId: ProductId, colors: Record<string, string>, frosting: number): THREE.Group {
+  if (productId === 'copo_americano') return buildCopoAmericano(colors, frosting)
+  if (productId === 'xicara_cafe') return buildXicara(colors)
+  return buildPrato(colors)
+}
+
+/**
+ * UV DTF decal at true physical size (cm).
+ * Curved products: partial cylinder patch with arc length = art width.
+ * Plate: flat plane on the well face.
+ */
+function buildDecal(
+  product: THREE.Group,
+  artTex: THREE.CanvasTexture | null,
+  artSize: ArtSizeCm,
+  transform: ArtTransform,
+  showGuide: boolean,
+): THREE.Group {
+  const decalGroup = new THREE.Group()
+  const radius: number = product.userData.printRadius ?? 0
+  const centerY: number = (product.userData.printCenterY ?? 5) + transform.offsetYCm
+  const isFlat = !!product.userData.isFlat
+  const artW = Math.max(0.5, artSize.width)
+  const artH = Math.max(0.5, artSize.height)
+
+  if (isFlat || radius < 0.1) {
+    // Flat plate: offsets move in the plate plane (X / Z). Y stays on the well face.
+    const faceY = (product.userData.printCenterY ?? 0.85) + 0.04
+    const px = transform.offsetXCm
+    const pz = -transform.offsetYCm
+    if (artTex) {
+      const geo = new THREE.PlaneGeometry(artW, artH)
+      const mat = new THREE.MeshStandardMaterial({
+        map: artTex,
+        transparent: true,
+        roughness: 0.45,
+        metalness: 0,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+      })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.rotation.x = -Math.PI / 2
+      mesh.position.set(px, faceY, pz)
+      mesh.name = 'printArea'
+      decalGroup.add(mesh)
+    }
+
+    if (showGuide) {
+      const guide = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.PlaneGeometry(artW, artH)),
+        new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.45 }),
+      )
+      guide.rotation.x = -Math.PI / 2
+      guide.position.set(px, faceY + 0.01, pz)
+      decalGroup.add(guide)
+    }
+    return decalGroup
+  }
+
+  // Curved frontal patch: arc length = artW → theta = artW / radius
+  const theta = artW / radius
+  const segs = Math.max(24, Math.ceil(48 * (theta / Math.PI)))
+  // Front faces +Z; thetaStart from +X CCW → center on +Z ⇒ π/2 − θ/2
+  const thetaStart = Math.PI / 2 - theta / 2
+  const patchR = radius + 0.06
+
+  if (artTex) {
+    const geo = new THREE.CylinderGeometry(patchR, patchR, artH, segs, 1, true, thetaStart, theta)
+    const mat = new THREE.MeshStandardMaterial({
+      map: artTex,
+      transparent: true,
+      roughness: 0.42,
+      metalness: 0.02,
+      depthWrite: false,
+      side: THREE.FrontSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    })
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.position.y = centerY
+    // Horizontal offset: rotate around Y (cm along circumference → radians)
+    mesh.rotation.y = -transform.offsetXCm / radius
+    mesh.name = 'printArea'
+    decalGroup.add(mesh)
+  }
+
+  if (showGuide) {
+    const gGeo = new THREE.CylinderGeometry(patchR + 0.02, patchR + 0.02, artH, segs, 1, true, thetaStart, theta)
+    const edges = new THREE.EdgesGeometry(gGeo)
+    gGeo.dispose()
+    const guide = new THREE.LineSegments(
+      edges,
+      new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.4 }),
+    )
+    guide.position.y = centerY
+    guide.rotation.y = -transform.offsetXCm / radius
+    decalGroup.add(guide)
+  }
+
+  return decalGroup
+}
+
 const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas(
-  { productId, productColor, backgroundColor, artImage, transform, className },
+  {
+    productId,
+    colors,
+    backgroundColor,
+    artImage,
+    artSizeCm,
+    transform,
+    showGuide = true,
+    frosting = 0.08,
+    className,
+  },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -328,9 +428,10 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
     scene: THREE.Scene
     camera: THREE.PerspectiveCamera
     controls: OrbitControls
-    productGroup: THREE.Group | null
+    productRoot: THREE.Group | null
     artTex: THREE.CanvasTexture | null
     ground: THREE.Mesh
+    pmrem: THREE.PMREMGenerator
     animId: number
   } | null>(null)
 
@@ -340,10 +441,6 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
       const mount = mountRef.current
       if (!s || !mount) return null
 
-      const prevW = s.renderer.domElement.width
-      const prevH = s.renderer.domElement.height
-      const prevPixel = s.renderer.getPixelRatio()
-
       s.renderer.setPixelRatio(1)
       s.renderer.setSize(width, height, false)
       s.camera.aspect = width / height
@@ -352,27 +449,27 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
       s.renderer.render(s.scene, s.camera)
       const url = s.renderer.domElement.toDataURL('image/png')
 
-      // Restore
       const rect = mount.getBoundingClientRect()
       s.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       s.renderer.setSize(rect.width, rect.height, false)
       s.camera.aspect = rect.width / Math.max(rect.height, 1)
       s.camera.updateProjectionMatrix()
-      // silence unused
-      void prevW
-      void prevH
-      void prevPixel
       return url
     },
     setViewAngle(angle) {
       const s = stateRef.current
       if (!s) return
+      const targetY = s.productRoot?.userData.targetY ?? 4.5
+      s.controls.target.set(0, targetY, 0)
       if (angle === 'frente') {
-        s.camera.position.set(0, 1.4, 3.2)
+        s.camera.position.set(0, targetY + 1.5, productId === 'prato' ? 28 : 18)
       } else {
-        s.camera.position.set(2.4, 1.8, 2.6)
+        s.camera.position.set(
+          productId === 'prato' ? 16 : 11,
+          targetY + (productId === 'prato' ? 14 : 4),
+          productId === 'prato' ? 16 : 14,
+        )
       }
-      s.controls.target.set(0, 0.7, 0)
       s.controls.update()
     },
   }))
@@ -385,64 +482,74 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(backgroundColor)
 
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100)
-    camera.position.set(2.4, 1.8, 2.6)
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 200)
+    camera.position.set(11, 8, 14)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false })
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      preserveDrawingBuffer: true,
+      alpha: false,
+      powerPreference: 'high-performance',
+    })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.05
     mount.appendChild(renderer.domElement)
+
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    const env = new RoomEnvironment()
+    scene.environment = pmrem.fromScene(env, 0.04).texture
+    env.dispose()
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
-    controls.dampingFactor = 0.08
-    controls.minDistance = 1.5
-    controls.maxDistance = 8
-    controls.maxPolarAngle = Math.PI * 0.49
-    controls.target.set(0, 0.7, 0)
+    controls.dampingFactor = 0.07
+    controls.minDistance = 8
+    controls.maxDistance = 50
+    controls.maxPolarAngle = Math.PI * 0.495
+    controls.target.set(0, 4.5, 0)
 
-    // Lights — soft studio
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45)
-    scene.add(ambient)
-    const key = new THREE.DirectionalLight(0xfff5e6, 1.15)
-    key.position.set(3, 5, 2)
+    // Soft studio lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.35))
+    const key = new THREE.DirectionalLight(0xfff6e8, 1.35)
+    key.position.set(8, 16, 6)
     key.castShadow = true
-    key.shadow.mapSize.set(1024, 1024)
-    key.shadow.camera.near = 0.5
-    key.shadow.camera.far = 20
-    key.shadow.camera.left = -4
-    key.shadow.camera.right = 4
-    key.shadow.camera.top = 4
-    key.shadow.camera.bottom = -4
+    key.shadow.mapSize.set(2048, 2048)
+    key.shadow.camera.near = 1
+    key.shadow.camera.far = 50
+    key.shadow.camera.left = -20
+    key.shadow.camera.right = 20
+    key.shadow.camera.top = 20
+    key.shadow.camera.bottom = -20
+    key.shadow.bias = -0.0002
     scene.add(key)
-    const fill = new THREE.DirectionalLight(0xc8d8ff, 0.45)
-    fill.position.set(-3, 2, -1)
+    const fill = new THREE.DirectionalLight(0xc9d7ff, 0.5)
+    fill.position.set(-10, 8, -4)
     scene.add(fill)
-    const rim = new THREE.DirectionalLight(0xffffff, 0.25)
-    rim.position.set(0, 3, -4)
+    const rim = new THREE.DirectionalLight(0xffffff, 0.35)
+    rim.position.set(0, 10, -12)
     scene.add(rim)
 
-    // Ground shadow catcher
-    const groundGeo = new THREE.CircleGeometry(3.5, 64)
-    const groundMat = new THREE.ShadowMaterial({ opacity: 0.28 })
+    // Ground contact shadow
+    const groundGeo = new THREE.CircleGeometry(30, 64)
+    const groundMat = new THREE.ShadowMaterial({ opacity: 0.32 })
     const ground = new THREE.Mesh(groundGeo, groundMat)
     ground.rotation.x = -Math.PI / 2
     ground.position.y = 0
     ground.receiveShadow = true
     scene.add(ground)
 
-    // Soft floor disc for color context
-    const floorGeo = new THREE.CircleGeometry(3.2, 64)
     const floorMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(backgroundColor).multiplyScalar(0.92),
-      roughness: 0.9,
+      color: new THREE.Color(backgroundColor).multiplyScalar(0.94),
+      roughness: 0.92,
       metalness: 0,
     })
-    const floor = new THREE.Mesh(floorGeo, floorMat)
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(28, 64), floorMat)
     floor.rotation.x = -Math.PI / 2
-    floor.position.y = -0.002
+    floor.position.y = -0.01
     floor.receiveShadow = true
     scene.add(floor)
     ground.userData.floor = floor
@@ -464,9 +571,10 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
       scene,
       camera,
       controls,
-      productGroup: null,
+      productRoot: null,
       artTex: null,
       ground,
+      pmrem,
       animId: 0,
     }
 
@@ -484,12 +592,14 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
       const st = stateRef.current
       if (st) {
         cancelAnimationFrame(st.animId)
-        if (st.productGroup) {
-          st.scene.remove(st.productGroup)
-          disposeObject(st.productGroup)
+        if (st.productRoot) {
+          st.scene.remove(st.productRoot)
+          disposeObject(st.productRoot)
         }
         if (st.artTex) st.artTex.dispose()
         st.controls.dispose()
+        st.pmrem.dispose()
+        st.scene.environment?.dispose()
         st.renderer.dispose()
         if (st.renderer.domElement.parentNode === mount) {
           mount.removeChild(st.renderer.domElement)
@@ -500,7 +610,6 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
     // eslint-disable-next-line react-hooks/exhaustive-deps -- init once
   }, [])
 
-  // Background color
   useEffect(() => {
     const s = stateRef.current
     if (!s) return
@@ -508,48 +617,64 @@ const MockupCanvas = forwardRef<MockupCanvasHandle, Props>(function MockupCanvas
     const floor = s.ground.userData.floor as THREE.Mesh | undefined
     if (floor) {
       const m = floor.material as THREE.MeshStandardMaterial
-      m.color = new THREE.Color(backgroundColor).multiplyScalar(0.92)
+      m.color = new THREE.Color(backgroundColor).multiplyScalar(0.94)
     }
   }, [backgroundColor])
 
-  // Rebuild product + art when inputs change
+  // Rebuild product + decal
   useEffect(() => {
     const s = stateRef.current
     if (!s) return
 
-    if (s.productGroup) {
-      s.scene.remove(s.productGroup)
-      disposeObject(s.productGroup)
-      s.productGroup = null
+    if (s.productRoot) {
+      s.scene.remove(s.productRoot)
+      disposeObject(s.productRoot)
+      s.productRoot = null
     }
     if (s.artTex) {
       s.artTex.dispose()
       s.artTex = null
     }
 
-    const product = getProduct(productId)
-    const baked = bakeArtTexture(
-      artImage,
-      transform,
-      product.printAreaMm.width,
-      product.printAreaMm.height,
-    )
-    const tex = new THREE.CanvasTexture(baked)
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = s.renderer.capabilities.getMaxAnisotropy()
-    tex.wrapS = THREE.ClampToEdgeWrapping
-    tex.wrapT = THREE.ClampToEdgeWrapping
-    // Cylinders need RepeatWrapping for seamless feel; art is already baked full-width
-    if (productId !== 'prato') {
-      tex.wrapS = THREE.RepeatWrapping
-    }
-    tex.needsUpdate = true
-    s.artTex = tex
+    const root = new THREE.Group()
+    const product = buildProduct(productId, colors, frosting)
+    root.add(product)
+    root.userData = { ...product.userData }
 
-    const group = buildProduct(productId, productColor, tex)
-    s.scene.add(group)
-    s.productGroup = group
-  }, [productId, productColor, artImage, transform])
+    let tex: THREE.CanvasTexture | null = null
+    if (artImage) {
+      const baked = bakeArtTexture(artImage, transform)
+      tex = new THREE.CanvasTexture(baked)
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = s.renderer.capabilities.getMaxAnisotropy()
+      tex.wrapS = THREE.ClampToEdgeWrapping
+      tex.wrapT = THREE.ClampToEdgeWrapping
+      tex.needsUpdate = true
+      s.artTex = tex
+    }
+
+    const decal = buildDecal(product, tex, artSizeCm, transform, showGuide)
+    root.add(decal)
+
+    s.scene.add(root)
+    s.productRoot = root
+
+    // Frame camera when product changes
+    const targetY = product.userData.targetY ?? getProduct(productId).heightCm / 2
+    s.controls.target.set(0, targetY, 0)
+    root.userData.productId = productId
+    const meta = s as typeof s & { lastProductId?: ProductId }
+    if (meta.lastProductId !== productId) {
+      const dist = productId === 'prato' ? 26 : 16
+      s.camera.position.set(
+        dist * 0.55,
+        targetY + (productId === 'prato' ? 12 : 3.2),
+        dist * 0.75,
+      )
+      meta.lastProductId = productId
+    }
+    s.controls.update()
+  }, [productId, colors, artImage, artSizeCm, transform, showGuide, frosting])
 
   return <div ref={mountRef} className={className} />
 })

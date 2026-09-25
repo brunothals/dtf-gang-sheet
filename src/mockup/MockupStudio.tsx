@@ -1,20 +1,35 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, DragEvent } from 'react'
 import MockupCanvas, {
   type ArtTransform,
   type MockupCanvasHandle,
 } from './MockupCanvas'
-import { PRODUCTS, type ProductId, getProduct } from './products'
+import {
+  PRODUCTS,
+  ART_SIZE_PRESETS,
+  CERAMIC_COLOR_PRESETS,
+  GLASS_TINT_PRESETS,
+  type ProductId,
+  type ArtSizeCm,
+  getProduct,
+  defaultColorsFor,
+} from './products'
 import { EXPORT_PRESETS, downloadMockupPng, type ExportPreset } from './exportMockup'
 import './MockupStudio.css'
 
 const DEFAULT_TRANSFORM: ArtTransform = {
-  scale: 1,
-  offsetX: 0,
-  offsetY: 0,
+  offsetXCm: 0,
+  offsetYCm: 0,
   rotationDeg: 0,
   flipH: false,
   flipV: false,
+}
+
+function presetIdForSize(size: ArtSizeCm): string {
+  const match = ART_SIZE_PRESETS.find(
+    (p) => p.size && p.size.width === size.width && p.size.height === size.height,
+  )
+  return match?.id ?? 'custom'
 }
 
 type Props = {
@@ -22,12 +37,18 @@ type Props = {
 }
 
 export default function MockupStudio({ onLogout }: Props) {
-  const [productId, setProductId] = useState<ProductId>('copo')
-  const [productColor, setProductColor] = useState('#ffffff')
+  const [productId, setProductId] = useState<ProductId>('copo_americano')
+  const [colors, setColors] = useState<Record<string, string>>(() => defaultColorsFor('copo_americano'))
+  const [frosting, setFrosting] = useState(0.08)
   const [bgColor, setBgColor] = useState('#e8eef5')
   const [artImage, setArtImage] = useState<HTMLImageElement | null>(null)
   const [artName, setArtName] = useState('')
+  const [artSizeCm, setArtSizeCm] = useState<ArtSizeCm>(() => getProduct('copo_americano').defaultArtSizeCm)
+  const [sizePresetId, setSizePresetId] = useState(() =>
+    presetIdForSize(getProduct('copo_americano').defaultArtSizeCm),
+  )
   const [transform, setTransform] = useState<ArtTransform>({ ...DEFAULT_TRANSFORM })
+  const [showGuide, setShowGuide] = useState(true)
   const [exportPresetId, setExportPresetId] = useState(EXPORT_PRESETS[0].id)
   const [status, setStatus] = useState('')
   const [dragOver, setDragOver] = useState(false)
@@ -49,7 +70,6 @@ export default function MockupStudio({ onLogout }: Props) {
       setArtName(file.name)
       setTransform({ ...DEFAULT_TRANSFORM })
       setStatus(`Arte carregada: ${file.name}`)
-      // Keep object URL alive while image is used (don't revoke immediately)
     }
     img.onerror = () => {
       URL.revokeObjectURL(url)
@@ -93,17 +113,55 @@ export default function MockupStudio({ onLogout }: Props) {
   )
 
   const selectProduct = (id: ProductId) => {
+    const p = getProduct(id)
     setProductId(id)
-    setProductColor(getProduct(id).defaultColor)
+    setColors(defaultColorsFor(id))
+    setArtSizeCm({ ...p.defaultArtSizeCm })
+    setSizePresetId(presetIdForSize(p.defaultArtSizeCm))
+    setTransform({ ...DEFAULT_TRANSFORM })
+    setFrosting(0.08)
     setStatus('')
+  }
+
+  const applySizePreset = (id: string) => {
+    setSizePresetId(id)
+    const preset = ART_SIZE_PRESETS.find((p) => p.id === id)
+    if (preset?.size) {
+      setArtSizeCm({ ...preset.size })
+    }
+  }
+
+  const patchArtSize = (partial: Partial<ArtSizeCm>) => {
+    setArtSizeCm((s) => {
+      const next = {
+        width: Math.max(0.5, Math.min(20, partial.width ?? s.width)),
+        height: Math.max(0.5, Math.min(20, partial.height ?? s.height)),
+      }
+      setSizePresetId(presetIdForSize(next))
+      return next
+    })
   }
 
   const patchTransform = (partial: Partial<ArtTransform>) => {
     setTransform((t) => ({ ...t, ...partial }))
   }
 
+  const setPartColor = (partId: string, hex: string) => {
+    setColors((c) => ({ ...c, [partId]: hex }))
+  }
+
+  const applyCeramicPreset = (hex: string) => {
+    setColors((c) => {
+      const next = { ...c }
+      for (const part of product.colorParts) {
+        next[part.id] = hex
+      }
+      return next
+    })
+  }
+
   const centerArt = () => {
-    setTransform((t) => ({ ...t, offsetX: 0, offsetY: 0, rotation: 1, rotationDeg: 0 }))
+    setTransform((t) => ({ ...t, offsetXCm: 0, offsetYCm: 0, rotationDeg: 0 }))
   }
 
   const clearArt = () => {
@@ -120,14 +178,22 @@ export default function MockupStudio({ onLogout }: Props) {
     setStatus(ok ? `PNG baixado (${preset.label}).` : 'Não foi possível exportar.')
   }
 
+  const sizeReadout = useMemo(
+    () => `Arte: ${artSizeCm.width}×${artSizeCm.height} cm no produto`,
+    [artSizeCm],
+  )
+
+  const isGlass = product.material === 'glass'
+  const isCeramic = product.material === 'porcelain'
+
   return (
     <div className="mockup-studio" onPaste={onPaste}>
       <header className="header mockup-header">
         <div>
           <h1>Mockup DTF UV</h1>
           <p className="subtitle">
-            Visualize a arte em produtos rígidos (prato, copo, taça, tumbler). Somente imagem —
-            sem vídeo.
+            Pré-visualização profissional em produtos rígidos — arte em tamanho real (cm), como adesivo
+            UV DTF (não wrap 360°).
           </p>
         </div>
         {onLogout && (
@@ -141,7 +207,7 @@ export default function MockupStudio({ onLogout }: Props) {
         <aside className="mockup-sidebar">
           <section className="card">
             <h2>Produto</h2>
-            <div className="product-grid">
+            <div className="product-grid product-grid-3">
               {PRODUCTS.map((p) => (
                 <button
                   key={p.id}
@@ -157,8 +223,12 @@ export default function MockupStudio({ onLogout }: Props) {
               ))}
             </div>
             <p className="hint">
-              Área de impressão: <strong>{product.printAreaMm.width} × {product.printAreaMm.height} mm</strong>
-              <br />
+              {product.diameterCm > 0 && (
+                <>
+                  Dimensão: <strong>Ø {product.diameterCm} × H {product.heightCm} cm</strong>
+                  <br />
+                </>
+              )}
               {product.description}
             </p>
           </section>
@@ -213,56 +283,149 @@ export default function MockupStudio({ onLogout }: Props) {
           </section>
 
           <section className="card">
-            <h2>Cores</h2>
-            <div className="grid-2">
+            <h2>Tamanho da arte</h2>
+            <div className="size-preset-grid">
+              {ART_SIZE_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`size-chip ${sizePresetId === p.id ? 'active' : ''}`}
+                  onClick={() => applySizePreset(p.id)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid-2 custom-size-row">
               <label className="field">
-                <span>Cor do produto</span>
+                <span>Largura (cm)</span>
                 <input
-                  type="color"
-                  value={productColor}
-                  onChange={(e) => setProductColor(e.target.value)}
+                  type="number"
+                  min={0.5}
+                  max={20}
+                  step={0.1}
+                  value={artSizeCm.width}
+                  onChange={(e) => patchArtSize({ width: Number(e.target.value) })}
                 />
               </label>
               <label className="field">
-                <span>Cor do fundo</span>
-                <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} />
+                <span>Altura (cm)</span>
+                <input
+                  type="number"
+                  min={0.5}
+                  max={20}
+                  step={0.1}
+                  value={artSizeCm.height}
+                  onChange={(e) => patchArtSize({ height: Number(e.target.value) })}
+                />
               </label>
             </div>
+            <p className="size-readout" aria-live="polite">
+              {sizeReadout}
+            </p>
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={showGuide}
+                onChange={(e) => setShowGuide(e.target.checked)}
+              />
+              <span>Guia de área de impressão</span>
+            </label>
           </section>
 
           <section className="card">
-            <h2>Arte — posição</h2>
+            <h2>Cores</h2>
+            {isGlass && (
+              <>
+                <div className="preset-row">
+                  {GLASS_TINT_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`color-swatch ${colors.glass === p.hex ? 'active' : ''}`}
+                      style={{ background: p.hex }}
+                      title={p.label}
+                      onClick={() => setPartColor('glass', p.hex)}
+                    />
+                  ))}
+                </div>
+                <label className="field">
+                  <span>Tom do vidro</span>
+                  <input
+                    type="color"
+                    value={colors.glass ?? '#e8f4fc'}
+                    onChange={(e) => setPartColor('glass', e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Fosco ({Math.round(frosting * 100)}%)</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={frosting}
+                    onChange={(e) => setFrosting(Number(e.target.value))}
+                  />
+                </label>
+              </>
+            )}
+            {isCeramic && (
+              <>
+                <div className="preset-row">
+                  {CERAMIC_COLOR_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="color-swatch"
+                      style={{ background: p.hex }}
+                      title={p.label}
+                      onClick={() => applyCeramicPreset(p.hex)}
+                    />
+                  ))}
+                </div>
+                <div className="grid-2">
+                  {product.colorParts.map((part) => (
+                    <label key={part.id} className="field">
+                      <span>{part.label}</span>
+                      <input
+                        type="color"
+                        value={colors[part.id] ?? part.default}
+                        onChange={(e) => setPartColor(part.id, e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+            <label className="field" style={{ marginTop: '0.5rem' }}>
+              <span>Cor do fundo</span>
+              <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} />
+            </label>
+          </section>
+
+          <section className="card">
+            <h2>Posição da arte</h2>
             <label className="field">
-              <span>Escala ({transform.scale.toFixed(2)})</span>
+              <span>Offset X ({transform.offsetXCm.toFixed(1)} cm)</span>
               <input
                 type="range"
-                min={0.2}
-                max={3}
-                step={0.01}
-                value={transform.scale}
-                onChange={(e) => patchTransform({ scale: Number(e.target.value) })}
+                min={-6}
+                max={6}
+                step={0.1}
+                value={transform.offsetXCm}
+                onChange={(e) => patchTransform({ offsetXCm: Number(e.target.value) })}
               />
             </label>
             <label className="field">
-              <span>Offset X ({transform.offsetX.toFixed(2)})</span>
+              <span>Offset Y ({transform.offsetYCm.toFixed(1)} cm)</span>
               <input
                 type="range"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={transform.offsetX}
-                onChange={(e) => patchTransform({ offsetX: Number(e.target.value) })}
-              />
-            </label>
-            <label className="field">
-              <span>Offset Y ({transform.offsetY.toFixed(2)})</span>
-              <input
-                type="range"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={transform.offsetY}
-                onChange={(e) => patchTransform({ offsetY: Number(e.target.value) })}
+                min={-6}
+                max={6}
+                step={0.1}
+                value={transform.offsetYCm}
+                onChange={(e) => patchTransform({ offsetYCm: Number(e.target.value) })}
               />
             </label>
             <label className="field">
@@ -278,7 +441,7 @@ export default function MockupStudio({ onLogout }: Props) {
             </label>
             <div className="row-actions wrap">
               <button type="button" className="btn" onClick={centerArt}>
-                Centralizar arte
+                Centralizar
               </button>
               <button
                 type="button"
@@ -315,7 +478,7 @@ export default function MockupStudio({ onLogout }: Props) {
             <button type="button" className="btn primary" onClick={handleExport} disabled={!artImage}>
               Baixar PNG
             </button>
-            <p className="hint">Sem marca d&apos;água. Fundo e produto entram no PNG.</p>
+            <p className="hint">Sem marca d&apos;água. O tamanho da arte no PNG é o mesmo da prévia 3D.</p>
           </section>
 
           {status && <p className="status-line">{status}</p>}
@@ -341,15 +504,20 @@ export default function MockupStudio({ onLogout }: Props) {
               </button>
             </div>
           </div>
-          <p className="hint preview-hint">Arraste para orbitar · scroll para zoom</p>
+          <p className="hint preview-hint">
+            Arraste para orbitar · scroll para zoom · {sizeReadout}
+          </p>
           <MockupCanvas
             ref={canvasRef}
             className="mockup-canvas"
             productId={productId}
-            productColor={productColor}
+            colors={colors}
             backgroundColor={bgColor}
             artImage={artImage}
+            artSizeCm={artSizeCm}
             transform={transform}
+            showGuide={showGuide}
+            frosting={frosting}
           />
         </section>
       </div>
