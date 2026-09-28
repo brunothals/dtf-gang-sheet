@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import '../App.css'
 import Shell from '../shell/Shell'
 import { AUTH_SESSION_KEY } from './credentials'
 import LoginScreen from './LoginScreen'

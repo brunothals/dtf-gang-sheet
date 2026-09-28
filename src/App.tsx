@@ -55,11 +55,7 @@ function formatPxSize(w: number, h: number): string {
   return `${w}×${h}`
 }
 
-type AppProps = {
-  onLogout?: () => void
-}
-
-export default function App({ onLogout }: AppProps) {
+export default function App() {
   const [config, setConfig] = useState<SheetConfig>({ ...DEFAULT_CONFIG })
   const [presetId, setPresetId] = useState('29x42')
   const [arts, setArts] = useState<ArtItem[]>([])
@@ -397,26 +393,34 @@ export default function App({ onLogout }: AppProps) {
     }
   }
 
+  const statusClass =
+    loading || exporting
+      ? 'status-banner is-busy'
+      : status
+        ? 'status-banner is-ok'
+        : ''
+
   return (
     <div className="app">
-      <header className="header">
-        <div>
-          <h1>DTF UV — Gang Sheets</h1>
-          <p className="subtitle">
-            Empacote artes PNG localmente (Mercado Livre / DTF UV). Nada é enviado ao servidor.
-          </p>
-        </div>
-        {onLogout && (
-          <button type="button" className="btn sm logout-btn" onClick={onLogout} title="Encerrar sessão">
-            Sair
-          </button>
-        )}
+      <header className="page-header">
+        <p className="section-kicker">Folha · Gang Sheet</p>
+        <h1>Montagem de folhas</h1>
+        <p className="subtitle">
+          Empacote artes PNG localmente para DTF UV e anúncios no Mercado Livre. Tudo roda no
+          navegador — nada é enviado ao servidor.
+        </p>
       </header>
 
       <main className="layout">
         {/* Configuração da folha */}
         <section className="card">
-          <h2>Configuração da folha</h2>
+          <div className="card-header">
+            <div>
+              <p className="section-kicker">Configuração</p>
+              <h2 className="card-title">Folha de impressão</h2>
+              <p className="card-desc">Tamanho, margens, gap e modo de montagem</p>
+            </div>
+          </div>
 
           <div className="grid-2">
             <label className="field">
@@ -610,12 +614,18 @@ export default function App({ onLogout }: AppProps) {
 
         {/* Importar */}
         <section className="card">
-          <h2>Importar</h2>
+          <div className="card-header">
+            <div>
+              <p className="section-kicker">Artes</p>
+              <h2 className="card-title">Importar PNGs</h2>
+              <p className="card-desc">Arquivos ou pasta inteira · corte automático opcional</p>
+            </div>
+          </div>
           <div className="import-actions">
             <button type="button" className="btn primary" onClick={() => fileInputRef.current?.click()} disabled={loading}>
               Selecionar PNGs
             </button>
-            <button type="button" className="btn" onClick={() => folderInputRef.current?.click()} disabled={loading}>
+            <button type="button" className="btn secondary" onClick={() => folderInputRef.current?.click()} disabled={loading}>
               Selecionar pasta
             </button>
             {arts.length > 0 && (
@@ -640,14 +650,20 @@ export default function App({ onLogout }: AppProps) {
             hidden
             onChange={(e) => e.target.files && importFiles(e.target.files)}
           />
-          {status && <p className="status">{status}</p>}
-          {loading && <p className="status">Aguarde…</p>}
+          {(status || loading) && (
+            <p className={statusClass || 'status-banner'}>
+              {loading && !status ? 'Aguarde…' : status}
+            </p>
+          )}
         </section>
 
         {/* Artes */}
         <section className="card card-wide">
           <div className="section-head">
-            <h2>Artes ({arts.length})</h2>
+            <div>
+              <p className="section-kicker">Artes</p>
+              <h2>Lista de artes ({arts.length})</h2>
+            </div>
             {arts.length > 0 && (
               <div className="art-toolbar">
                 <button type="button" className="btn sm" onClick={selectAllArts} title="Marcar todas as artes">
@@ -676,7 +692,13 @@ export default function App({ onLogout }: AppProps) {
             )}
           </div>
           {arts.length === 0 ? (
-            <p className="empty">Importe PNGs para começar.</p>
+            <div className="empty-state">
+              <p className="empty-state-title">Nenhuma arte ainda</p>
+              <p className="empty-state-desc">
+                Importe PNGs transparentes acima para montar a folha. Use &quot;Selecionar pasta&quot;
+                para lotes do Mercado Livre.
+              </p>
+            </div>
           ) : (
             <div className="art-table-wrap">
               <table className="art-table">
@@ -797,11 +819,14 @@ export default function App({ onLogout }: AppProps) {
         {/* Resultado */}
         <section className="card card-wide">
           <div className="result-head">
-            <h2>Resultado</h2>
+            <div>
+              <p className="section-kicker">Folhas</p>
+              <h2>Resultado da montagem</h2>
+            </div>
             <div className="export-actions">
               <button
                 type="button"
-                className="btn"
+                className="btn secondary"
                 disabled={arts.length === 0}
                 onClick={handlePreencherSobras}
                 title="Após o pedido: adiciona cópias extras só no espaço vazio, sem criar novas folhas"
@@ -830,11 +855,16 @@ export default function App({ onLogout }: AppProps) {
           )}
 
           {sheets.length === 0 ? (
-            <p className="empty">
-              {arts.length === 0
-                ? 'Nenhuma folha gerada ainda.'
-                : 'Nenhuma folha — verifique erros ou quantidades.'}
-            </p>
+            <div className="empty-state">
+              <p className="empty-state-title">
+                {arts.length === 0 ? 'Aguardando artes' : 'Nenhuma folha gerada'}
+              </p>
+              <p className="empty-state-desc">
+                {arts.length === 0
+                  ? 'Importe artes e ajuste quantidades — as folhas aparecem aqui automaticamente.'
+                  : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
+              </p>
+            </div>
           ) : (
             <div className="sheets">
               {sheets.map((sheet) => (
@@ -863,9 +893,7 @@ export default function App({ onLogout }: AppProps) {
         </section>
       </main>
 
-      <footer className="footer">
-        Processamento 100% no navegador · Qualidade nativa do PNG · DPI embutido (pHYs)
-      </footer>
     </div>
   )
 }
+

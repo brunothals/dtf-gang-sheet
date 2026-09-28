@@ -1,7 +1,7 @@
 .mockup-studio {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 0 1rem 3rem;
+  padding: 1.25rem 1.1rem 2rem;
 }
 
 .mockup-header {
@@ -24,7 +24,7 @@
 
 .mockup-preview-card {
   position: sticky;
-  top: 0.75rem;
+  top: 4.5rem;
   min-height: 560px;
   display: flex;
   flex-direction: column;
@@ -94,12 +94,12 @@
 }
 
 .product-card:hover {
-  border-color: var(--accent);
+  border-color: #c4b5fd;
 }
 
 .product-card.active {
-  border-color: var(--accent);
-  background: rgba(59, 130, 246, 0.15);
+  border-color: #c4b5fd;
+  background: var(--accent-soft);
 }
 
 .product-icon {
@@ -138,8 +138,8 @@
 
 .dropzone:hover,
 .dropzone.dragover {
-  border-color: var(--accent);
-  background: rgba(59, 130, 246, 0.08);
+  border-color: #c4b5fd;
+  background: var(--accent-soft);
 }
 
 .dropzone p {
@@ -210,11 +210,11 @@
 }
 
 .size-chip:hover {
-  border-color: var(--accent);
+  border-color: #c4b5fd;
 }
 
 .size-chip.active {
-  border-color: var(--accent);
+  border-color: #c4b5fd;
   background: var(--accent);
   color: #fff;
 }
@@ -232,12 +232,12 @@
 .size-readout {
   margin: 0.5rem 0 0.35rem;
   padding: 0.45rem 0.65rem;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--accent);
+  color: #c4b5fd;
 }
 
 .checkbox-field {
@@ -250,7 +250,7 @@
 
 .checkbox-field input[type='checkbox'] {
   width: auto;
-  accent-color: var(--accent);
+  accent-color: #c4b5fd;
 }
 
 .preset-row {
@@ -276,8 +276,8 @@
 }
 
 .color-swatch.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+  border-color: #c4b5fd;
+  box-shadow: 0 0 0 2px var(--accent-ring);
 }
 
 input[type='color'] {
@@ -292,7 +292,7 @@ input[type='color'] {
 
 input[type='range'] {
   width: 100%;
-  accent-color: var(--accent);
+  accent-color: #c4b5fd;
 }
 
 .status-line {

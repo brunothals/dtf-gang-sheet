@@ -33,11 +33,7 @@ function presetIdForSize(size: ArtSizeCm): string {
   return match?.id ?? 'custom'
 }
 
-type Props = {
-  onLogout?: () => void
-}
-
-export default function MockupStudio({ onLogout }: Props) {
+export default function MockupStudio() {
   const [productId, setProductId] = useState<ProductId>('copo_americano')
   const [colors, setColors] = useState<Record<string, string>>(() => defaultColorsFor('copo_americano'))
   const [frosting, setFrosting] = useState(0.08)
@@ -190,25 +186,24 @@ export default function MockupStudio({ onLogout }: Props) {
 
   return (
     <div className="mockup-studio" onPaste={onPaste}>
-      <header className="header mockup-header">
-        <div>
-          <h1>Mockup DTF UV</h1>
-          <p className="subtitle">
-            Pré-visualização profissional em produtos rígidos — arte em tamanho real (cm), como adesivo
-            UV DTF (não wrap 360°).
-          </p>
-        </div>
-        {onLogout && (
-          <button type="button" className="btn sm logout-btn" onClick={onLogout} title="Encerrar sessão">
-            Sair
-          </button>
-        )}
+      <header className="page-header mockup-header">
+        <p className="section-kicker">Mockup · UV DTF</p>
+        <h1>Estúdio de mockup</h1>
+        <p className="subtitle">
+          Pré-visualização em produtos rígidos — arte em tamanho real (cm), como adesivo UV DTF
+          (não wrap 360°). Ideal para anúncios e personalizados.
+        </p>
       </header>
 
       <div className="mockup-layout">
         <aside className="mockup-sidebar">
           <section className="card">
-            <h2>Produto</h2>
+            <div className="card-header">
+              <div>
+                <p className="section-kicker">Catálogo</p>
+                <h2 className="card-title">Produto</h2>
+              </div>
+            </div>
             <div className="product-grid product-grid-6">
               {PRODUCTS.map((p) => (
                 <button
@@ -236,7 +231,12 @@ export default function MockupStudio({ onLogout }: Props) {
           </section>
 
           <section className="card">
-            <h2>Arte PNG</h2>
+            <div className="card-header">
+              <div>
+                <p className="section-kicker">Arte</p>
+                <h2 className="card-title">PNG transparente</h2>
+              </div>
+            </div>
             <div
               className={`dropzone ${dragOver ? 'dragover' : ''}`}
               onDragOver={(e) => {

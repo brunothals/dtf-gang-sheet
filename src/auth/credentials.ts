@@ -3,6 +3,6 @@ export const USERNAME = 'Bruno'
 
 /** SHA-256 (hex) da senha em UTF-8 — não armazene a senha em texto claro no client. */
 export const PASSWORD_SHA256_HEX =
-  '7a5df5ffa0dec2228d90b8d0a0f1b0767b748b0a41314c123075b8289e4e053f'
+  '73a2af8864fc500fa49048bf3003776c19938f360e56bd03663866fb3087884a'
 
 export const AUTH_SESSION_KEY = 'dtf-gang-auth'

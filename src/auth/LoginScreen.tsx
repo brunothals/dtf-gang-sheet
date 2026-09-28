@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import BrandMark from '../components/BrandMark'
+import { BRAND_NAME, BRAND_TAGLINE } from '../brand'
 import { AUTH_SESSION_KEY, PASSWORD_SHA256_HEX, USERNAME } from './credentials'
 import { sha256Hex } from './hash'
 
@@ -36,9 +38,17 @@ export default function LoginScreen({ onSuccess }: Props) {
 
   return (
     <div className="login-page">
-      <form className="login-card card" onSubmit={handleSubmit}>
-        <h1>DTF UV — Acesso</h1>
-        <p className="login-sub">Entre com usuário e senha para continuar.</p>
+      <div className="login-ambient" aria-hidden />
+      <form className="login-card" onSubmit={handleSubmit}>
+        <div className="login-brand">
+          <BrandMark size={44} className="login-logo" />
+          <div>
+            <h1>{BRAND_NAME}</h1>
+            <p className="login-tagline">{BRAND_TAGLINE}</p>
+          </div>
+        </div>
+
+        <p className="login-sub">Acesso privado · entre com suas credenciais</p>
 
         <label className="field">
           <span>Usuário</span>
@@ -49,6 +59,7 @@ export default function LoginScreen({ onSuccess }: Props) {
             onChange={(e) => setUsuario(e.target.value)}
             disabled={busy}
             autoFocus
+            placeholder="Seu usuário"
           />
         </label>
 
@@ -60,14 +71,22 @@ export default function LoginScreen({ onSuccess }: Props) {
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
             disabled={busy}
+            placeholder="••••••••"
           />
         </label>
 
-        {erro && <p className="login-error">{erro}</p>}
+        {erro && (
+          <p className="login-error" role="alert">
+            {erro}
+          </p>
+        )}
 
         <button type="submit" className="btn primary login-btn" disabled={busy}>
           {busy ? 'Entrando…' : 'Entrar'}
         </button>
+
+        <p className="login-note">Processamento local no navegador · nada é enviado ao servidor</p>
+        <p className="login-soon">Em breve: planos SaaS</p>
       </form>
     </div>
   )
