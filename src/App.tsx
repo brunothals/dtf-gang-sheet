@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { saveAs } from 'file-saver'
 import {
   DEFAULT_CONFIG,
+  MAX_AUTO_HEIGHT_CM,
   SHEET_PRESETS,
   type ArtItem,
   type PackedSheet,
@@ -14,7 +15,12 @@ import {
   maxEqualQtyOnOneSheet,
   maxQtyOneArtOnOneSheet,
 } from './utils/fillSheet'
-import { downloadAllSheetsZip, downloadSheetPng } from './utils/exportPng'
+import {
+  buildSheetFilename,
+  buildZipFilename,
+  downloadAllSheetsZip,
+  downloadSheetPng,
+} from './utils/exportPng'
 import { computeNativeExportDpi, resolveExportDpi } from './utils/units'
 import './App.css'
 
@@ -66,6 +72,8 @@ export default function App() {
   const [exporting, setExporting] = useState(false)
   /** Checkbox por arte (default marcado ao importar) — usado em Dividir iguais */
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
+  /** Prefixo opcional nos arquivos exportados */
+  const [clientName, setClientName] = useState('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -368,11 +376,20 @@ export default function App() {
     setPackErrors(errors)
   }, [arts, packConfig])
 
+  const exportOpts = useMemo(
+    () => ({
+      cropEmpty: !!config.cropEmptyExport,
+      marginMm: config.marginMm,
+    }),
+    [config.cropEmptyExport, config.marginMm],
+  )
+
   const handleExportOne = async (sheet: PackedSheet) => {
     setExporting(true)
     setStatus(`Exportando folha ${sheet.index + 1} em ~${effectiveDpi} DPI (qualidade do PNG)…`)
     try {
-      await downloadSheetPng(sheet, effectiveDpi, `folha-${sheet.index + 1}.png`)
+      const filename = buildSheetFilename(sheet, sheets.length, clientName)
+      await downloadSheetPng(sheet, effectiveDpi, filename, exportOpts)
       setStatus(`Folha ${sheet.index + 1} exportada (~${effectiveDpi} DPI).`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar PNG.')
@@ -387,9 +404,16 @@ export default function App() {
     setStatus(`Exportando ${sheets.length} folha(s) em ~${effectiveDpi} DPI…`)
     try {
       if (sheets.length === 1) {
-        await downloadSheetPng(sheets[0], effectiveDpi)
+        const filename = buildSheetFilename(sheets[0], 1, clientName)
+        await downloadSheetPng(sheets[0], effectiveDpi, filename, exportOpts)
       } else {
-        await downloadAllSheetsZip(sheets, effectiveDpi)
+        await downloadAllSheetsZip(
+          sheets,
+          effectiveDpi,
+          buildZipFilename(clientName),
+          exportOpts,
+          clientName,
+        )
       }
       setStatus(`Exportação concluída (~${effectiveDpi} DPI).`)
     } catch (e) {
@@ -398,6 +422,21 @@ export default function App() {
       setExporting(false)
     }
   }
+
+  const setGrowMode = (mode: SheetConfig['sheetGrowMode']) => {
+    setConfig((c) => ({
+      ...c,
+      sheetGrowMode: mode,
+      // Recorte ligado por padrão ao entrar em sob medida
+      cropEmptyExport: mode === 'auto_height' ? true : c.cropEmptyExport,
+      // Grade combina bem com rolo sob medida
+      packMode: mode === 'auto_height' && c.packMode === 'maxrects' ? 'grade' : c.packMode,
+    }))
+  }
+
+  const isAutoHeight = config.sheetGrowMode === 'auto_height'
+  const usedReadout = sheets[0]?.usedHeightCm
+  const utilReadout = sheets[0]?.utilizationPct
 
   const statusClass =
     loading || exporting
@@ -417,7 +456,8 @@ export default function App() {
         </p>
       </header>
 
-      <main className="layout">
+      <main className="folha-layout">
+        <div className="folha-sidebar">
         {/* Configuração da folha */}
         <section className="card">
           <div className="card-header">
@@ -501,18 +541,24 @@ export default function App() {
               />
             </label>
             <label className="field">
-              <span>Altura (cm)</span>
-              <input
-                type="number"
-                min={1}
-                step={0.1}
-                value={config.heightCm}
-                disabled={presetId !== 'custom'}
-                onChange={(e) => {
-                  setPresetId('custom')
-                  updateConfig('heightCm', Number(e.target.value) || 1)
-                }}
-              />
+              <span>{isAutoHeight ? 'Altura (cm) — sob medida' : 'Altura (cm)'}</span>
+              {isAutoHeight ? (
+                <div className="dpi-readout" title="A altura cresce automaticamente">
+                  Cresce até {MAX_AUTO_HEIGHT_CM} cm
+                </div>
+              ) : (
+                <input
+                  type="number"
+                  min={1}
+                  step={0.1}
+                  value={config.heightCm}
+                  disabled={presetId !== 'custom'}
+                  onChange={(e) => {
+                    setPresetId('custom')
+                    updateConfig('heightCm', Number(e.target.value) || 1)
+                  }}
+                />
+              )}
             </label>
           </div>
           <div className="row-actions" style={{ marginTop: '-0.35rem', marginBottom: '0.65rem' }}>
@@ -523,6 +569,33 @@ export default function App() {
           <p className="hint" style={{ marginTop: '-0.35rem' }}>
             Presets em Largura × Altura (cm). Use &quot;Girar orientação&quot; para trocar paisagem/retrato.
           </p>
+
+          <fieldset className="pack-mode">
+            <legend>Tipo de folha</legend>
+            <label className="radio">
+              <input
+                type="radio"
+                name="sheetGrowMode"
+                checked={!isAutoHeight}
+                onChange={() => setGrowMode('fixed')}
+              />
+              <span>Folha fixa (W × H · várias folhas)</span>
+            </label>
+            <label className="radio">
+              <input
+                type="radio"
+                name="sheetGrowMode"
+                checked={isAutoHeight}
+                onChange={() => setGrowMode('auto_height')}
+              />
+              <span>Folha sob medida / rolo (largura fixa · altura cresce)</span>
+            </label>
+            <p className="hint">
+              Em <strong>sob medida</strong>, a largura vem do preset; a altura cresce até caber
+              todas as artes em <em>uma</em> tira contínua (máx. {MAX_AUTO_HEIGHT_CM} cm).
+              Recomendado com modo <strong>Grade</strong>.
+            </p>
+          </fieldset>
 
           <div className="grid-2">
             <label className="field">
@@ -736,7 +809,7 @@ export default function App() {
         </section>
 
         {/* Artes */}
-        <section className="card card-wide">
+        <section className="card">
           <div className="section-head">
             <div>
               <p className="section-kicker">Artes</p>
@@ -894,81 +967,180 @@ export default function App() {
           )}
         </section>
 
-        {/* Resultado */}
-        <section className="card card-wide">
-          <div className="result-head">
+        {/* Exportação */}
+        <section className="card">
+          <div className="card-header">
             <div>
-              <p className="section-kicker">Folhas</p>
-              <h2>Resultado da montagem</h2>
-            </div>
-            <div className="export-actions">
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={arts.length === 0}
-                onClick={handlePreencherSobras}
-                title="Após o pedido: adiciona cópias extras só no espaço vazio, sem criar novas folhas"
-              >
-                Preencher sobras
-              </button>
-              {sheets.length > 0 && (
-                <button
-                  type="button"
-                  className="btn primary"
-                  disabled={exporting}
-                  onClick={handleExportAll}
-                >
-                  {sheets.length === 1 ? 'Baixar PNG' : 'Baixar todas (ZIP)'}
-                </button>
-              )}
+              <p className="section-kicker">Exportar</p>
+              <h2 className="card-title">Salvar folhas</h2>
+              <p className="card-desc">Nome do cliente, recorte e download</p>
             </div>
           </div>
 
-          {packErrors.length > 0 && (
-            <ul className="errors">
-              {packErrors.map((e, i) => (
-                <li key={i}>{e}</li>
-              ))}
-            </ul>
-          )}
+          <label className="field">
+            <span>Nome do cliente</span>
+            <input
+              type="text"
+              value={clientName}
+              placeholder="Ex.: Maria Silva (opcional)"
+              onChange={(e) => setClientName(e.target.value)}
+              maxLength={80}
+            />
+          </label>
+          <p className="hint">
+            Se preenchido, os arquivos saem como{' '}
+            <code>{'{Cliente}_gang.png'}</code> ou{' '}
+            <code>{'{Cliente}_folha-01.png'}</code> / ZIP{' '}
+            <code>{'{Cliente}_folhas.zip'}</code>.
+          </p>
 
-          {sheets.length === 0 ? (
-            <div className="empty-state">
-              <p className="empty-state-title">
-                {arts.length === 0 ? 'Aguardando artes' : 'Nenhuma folha gerada'}
-              </p>
-              <p className="empty-state-desc">
-                {arts.length === 0
-                  ? 'Importe artes e ajuste quantidades — as folhas aparecem aqui automaticamente.'
-                  : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
-              </p>
-            </div>
-          ) : (
-            <div className="sheets">
-              {sheets.map((sheet) => (
-                <div key={sheet.index} className="sheet-card">
-                  <div className="sheet-meta">
-                    <strong>Folha {sheet.index + 1}</strong>
-                    <span>
-                      {config.widthCm} × {config.heightCm} cm · {sheet.placements.length} peça(s) · ~{effectiveDpi} DPI
-                    </span>
-                    <button
-                      type="button"
-                      className="btn sm"
-                      disabled={exporting}
-                      onClick={() => handleExportOne(sheet)}
-                    >
-                      Baixar PNG
-                    </button>
-                  </div>
-                  <div className="sheet-preview checker">
-                    <img src={sheet.previewUrl} alt={`Folha ${sheet.index + 1}`} />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={config.cropEmptyExport}
+              onChange={(e) => updateConfig('cropEmptyExport', e.target.checked)}
+            />
+            <span>Recortar espaços vazios no export</span>
+          </label>
+          <p className="hint">
+            Gera PNG só da área com artes + margem ({config.marginMm} mm), sem a folha
+            vazia em volta. Mantém DPI (pHYs). Ligado por padrão em folha sob medida.
+          </p>
+
+          <div className="export-actions" style={{ marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={arts.length === 0}
+              onClick={handlePreencherSobras}
+              title="Após o pedido: adiciona cópias extras só no espaço vazio, sem criar novas folhas"
+            >
+              Preencher sobras
+            </button>
+            {sheets.length > 0 && (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={exporting}
+                onClick={handleExportAll}
+              >
+                {sheets.length === 1 ? 'Baixar PNG' : 'Baixar todas (ZIP)'}
+              </button>
+            )}
+          </div>
+          {(status || loading || exporting) && (
+            <p className={statusClass || 'status-banner'}>
+              {loading && !status ? 'Aguarde…' : status}
+            </p>
           )}
         </section>
+        </div>{/* /.folha-sidebar */}
+
+        {/* Preview sticky à direita */}
+        <aside className="folha-preview-pane">
+          <div className="folha-preview-sticky">
+            <div className="result-head">
+              <div>
+                <p className="section-kicker">Pré-visualização</p>
+                <h2>
+                  {isAutoHeight
+                    ? 'Folha sob medida'
+                    : sheets.length > 0
+                      ? `${sheets.length} folha(s)`
+                      : 'Folhas'}
+                </h2>
+              </div>
+            </div>
+
+            {isAutoHeight && sheets.length > 0 && usedReadout != null && (
+              <div className="used-readout" role="status">
+                <div className="used-readout-main">
+                  <strong>Usado: {usedReadout.toFixed(1)} cm de altura</strong>
+                  <span>
+                    Largura {config.widthCm} cm
+                    {utilReadout != null ? ` · Aproveitamento ${utilReadout.toFixed(1)}%` : ''}
+                  </span>
+                </div>
+                <div className="used-bar" aria-hidden>
+                  <div
+                    className="used-bar-fill"
+                    style={{
+                      width: `${Math.min(100, (usedReadout / MAX_AUTO_HEIGHT_CM) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <p className="hint" style={{ marginTop: '0.35rem' }}>
+                  Limite {MAX_AUTO_HEIGHT_CM} cm · ~{effectiveDpi} DPI
+                </p>
+              </div>
+            )}
+
+            {packErrors.length > 0 && (
+              <ul className="errors">
+                {packErrors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            )}
+
+            {sheets.length === 0 ? (
+              <div className="empty-state">
+                <p className="empty-state-title">
+                  {arts.length === 0 ? 'Aguardando artes' : 'Nenhuma folha gerada'}
+                </p>
+                <p className="empty-state-desc">
+                  {arts.length === 0
+                    ? 'Importe artes à esquerda — a pré-visualização aparece aqui ao vivo.'
+                    : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
+                </p>
+              </div>
+            ) : (
+              <div className="sheets sheets-preview-large">
+                {sheets.map((sheet) => (
+                  <div key={sheet.index} className="sheet-card sheet-card-large">
+                    <div className="sheet-meta">
+                      <strong>
+                        {isAutoHeight
+                          ? 'Tira contínua'
+                          : `Folha ${sheet.index + 1}`}
+                      </strong>
+                      <span>
+                        {isAutoHeight
+                          ? `${config.widthCm} × ${sheet.usedHeightCm?.toFixed(1) ?? '?'} cm`
+                          : `${config.widthCm} × ${config.heightCm} cm`}
+                        {' · '}
+                        {sheet.placements.length} peça(s) · ~{effectiveDpi} DPI
+                        {config.cropEmptyExport ? ' · export recortado' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={exporting}
+                        onClick={() => handleExportOne(sheet)}
+                      >
+                        Baixar PNG
+                      </button>
+                    </div>
+                    <div className="sheet-preview checker">
+                      {sheet.previewUrl ? (
+                        <img
+                          src={sheet.previewUrl}
+                          alt={
+                            isAutoHeight
+                              ? 'Pré-visualização da tira'
+                              : `Folha ${sheet.index + 1}`
+                          }
+                        />
+                      ) : (
+                        <p className="empty">Preview indisponível (folha muito grande)</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
       </main>
 
     </div>

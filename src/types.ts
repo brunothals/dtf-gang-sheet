@@ -10,6 +10,12 @@ export interface SheetPreset {
 /** Modo de montagem das peças na folha. */
 export type PackMode = 'maxrects' | 'grade' | 'group_rows' | 'group_cols'
 
+/** Folha fixa (multi-folha) vs rolo/folha sob medida (altura cresce). */
+export type SheetGrowMode = 'fixed' | 'auto_height'
+
+/** Altura máxima (cm) no modo Folha sob medida. */
+export const MAX_AUTO_HEIGHT_CM = 500
+
 export interface SheetConfig {
   widthCm: number
   heightCm: number
@@ -53,6 +59,16 @@ export interface SheetConfig {
   /** Cortar bordas transparentes (alpha bbox) */
   trimEnabled: boolean
   alphaThreshold: number
+  /**
+   * fixed = W×H fixos, várias folhas.
+   * auto_height = largura fixa; altura cresce para caber tudo em 1 tira (máx. MAX_AUTO_HEIGHT_CM).
+   */
+  sheetGrowMode: SheetGrowMode
+  /**
+   * Se true, o PNG exportado é recortado ao bounding box das peças + margem (sem área vazia).
+   * Padrão ligado; especialmente útil em auto_height.
+   */
+  cropEmptyExport: boolean
 }
 
 export interface ArtItem {
@@ -95,6 +111,12 @@ export interface PackedSheet {
   heightPx: number
   placements: PackedPlacement[]
   previewUrl: string
+  /** Altura usada (conteúdo + margem inferior) em px — preenchido em auto_height. */
+  usedHeightPx?: number
+  /** Altura usada em cm (leitura “Usado: X.X cm”). */
+  usedHeightCm?: number
+  /** Aproveitamento % = área das peças / (largura × altura usada). */
+  utilizationPct?: number
 }
 
 /** Presets de folha (ML + rolo DTF + papel). Labels em Largura × Altura cm. */
@@ -131,6 +153,8 @@ export const DEFAULT_CONFIG: SheetConfig = {
   maxSideCm: 5,
   trimEnabled: true,
   alphaThreshold: 8,
+  sheetGrowMode: 'fixed',
+  cropEmptyExport: true,
 }
 
 /**

@@ -6,7 +6,8 @@ import type {
   PackMode,
   SheetConfig,
 } from '../types'
-import { cmToPx, computePrintSizeCm, mmToPx, roundPx } from './units'
+import { MAX_AUTO_HEIGHT_CM } from '../types'
+import { cmToPx, computePrintSizeCm, mmToPx, pxToCm, roundPx } from './units'
 
 /** Lado máximo do preview na UI (px) — exportação usa resolução nativa. */
 const PREVIEW_MAX_SIDE = 1400
@@ -41,7 +42,9 @@ export function getArtPrintSize(art: ArtItem, config: SheetConfig): ArtPrintSize
   const heightPx = roundPx(cmToPx(heightCm, config.dpi))
 
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
-  const sheetH = roundPx(cmToPx(config.heightCm, config.dpi))
+  const grow = config.sheetGrowMode === 'auto_height'
+  const heightCmLimit = grow ? MAX_AUTO_HEIGHT_CM : config.heightCm
+  const sheetH = roundPx(cmToPx(heightCmLimit, config.dpi))
   const marginPx = roundPx(mmToPx(config.marginMm, config.dpi))
   const usableW = sheetW - 2 * marginPx
   const usableH = sheetH - 2 * marginPx
@@ -49,7 +52,11 @@ export function getArtPrintSize(art: ArtItem, config: SheetConfig): ArtPrintSize
   let error: string | undefined
   // Fit check uses the (possibly swapped) print size — packer never mixes orientations
   if (!(widthPx <= usableW && heightPx <= usableH)) {
-    error = `Não cabe na folha (${config.widthCm}×${config.heightCm} cm com margem ${config.marginMm} mm). Tamanho impresso: ${widthCm.toFixed(2)}×${heightCm.toFixed(2)} cm.`
+    if (grow) {
+      error = `Não cabe na largura do rolo (${config.widthCm} cm, margem ${config.marginMm} mm) ou excede ${MAX_AUTO_HEIGHT_CM} cm de altura. Tamanho impresso: ${widthCm.toFixed(2)}×${heightCm.toFixed(2)} cm.`
+    } else {
+      error = `Não cabe na folha (${config.widthCm}×${config.heightCm} cm com margem ${config.marginMm} mm). Tamanho impresso: ${widthCm.toFixed(2)}×${heightCm.toFixed(2)} cm.`
+    }
   }
 
   return {
@@ -457,11 +464,121 @@ function packMaxRects(
   return sheets
 }
 
+
+/** Bounding box das peças colocadas (coordenadas da folha). */
+export function getPlacementsBBox(
+  placements: PackedPlacement[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (placements.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of placements) {
+    minX = Math.min(minX, p.x)
+    minY = Math.min(minY, p.y)
+    maxX = Math.max(maxX, p.x + p.width)
+    maxY = Math.max(maxY, p.y + p.height)
+  }
+  return { minX, minY, maxX, maxY }
+}
+
+/**
+ * Retângulo de recorte = bbox das peças expandido por marginPx,
+ * limitado à folha. Usado no export "Recortar espaços vazios".
+ */
+export function getCropRect(
+  sheetW: number,
+  sheetH: number,
+  placements: PackedPlacement[],
+  marginPx: number,
+): { x: number; y: number; width: number; height: number } | null {
+  const bbox = getPlacementsBBox(placements)
+  if (!bbox) return null
+  const x = Math.max(0, Math.floor(bbox.minX - marginPx))
+  const y = Math.max(0, Math.floor(bbox.minY - marginPx))
+  const right = Math.min(sheetW, Math.ceil(bbox.maxX + marginPx))
+  const bottom = Math.min(sheetH, Math.ceil(bbox.maxY + marginPx))
+  const width = Math.max(1, right - x)
+  const height = Math.max(1, bottom - y)
+  return { x, y, width, height }
+}
+
+/** Desloca placements para origem (0,0) relativa ao crop. */
+export function shiftPlacements(
+  placements: PackedPlacement[],
+  offsetX: number,
+  offsetY: number,
+): PackedPlacement[] {
+  return placements.map((p) => ({
+    ...p,
+    x: p.x - offsetX,
+    y: p.y - offsetY,
+  }))
+}
+
+function sheetUtilizationPct(
+  placements: PackedPlacement[],
+  widthPx: number,
+  heightPx: number,
+): number {
+  if (widthPx <= 0 || heightPx <= 0 || placements.length === 0) return 0
+  let area = 0
+  for (const p of placements) area += p.width * p.height
+  return Math.min(100, (area / (widthPx * heightPx)) * 100)
+}
+
+/**
+ * Após packing em bin alto: reduz altura da folha ao conteúdo + margem inferior
+ * e anexa métricas usedHeight / aproveitamento.
+ */
+function shrinkAutoHeightSheet(
+  sheet: PackedSheet,
+  config: SheetConfig,
+  marginPx: number,
+  skipPreview: boolean,
+): { sheet: PackedSheet; overflow: boolean } {
+  const bbox = getPlacementsBBox(sheet.placements)
+  if (!bbox) {
+    return { sheet, overflow: false }
+  }
+  const usedBottom = bbox.maxY + marginPx
+  const usedHeightPx = Math.max(1, Math.ceil(usedBottom))
+  const usedHeightCm = pxToCm(usedHeightPx, config.dpi)
+  const overflow = usedHeightCm > MAX_AUTO_HEIGHT_CM + 0.05
+
+  const widthPx = sheet.widthPx
+  const heightPx = overflow
+    ? roundPx(cmToPx(MAX_AUTO_HEIGHT_CM, config.dpi))
+    : usedHeightPx
+
+  const placements = sheet.placements
+  const previewUrl = skipPreview
+    ? ''
+    : buildPreviewUrl(widthPx, heightPx, placements)
+
+  return {
+    overflow,
+    sheet: {
+      ...sheet,
+      widthPx,
+      heightPx,
+      placements,
+      previewUrl,
+      usedHeightPx,
+      usedHeightCm: Math.round(usedHeightCm * 10) / 10,
+      utilizationPct:
+        Math.round(sheetUtilizationPct(placements, widthPx, heightPx) * 10) / 10,
+    },
+  }
+}
+
 /**
  * Empacota artes em folhas.
  * - packMode maxrects: MaxRects (multi-bin), pode misturar artes
  * - packMode grade: shelf first-fit (fileiras alinhadas; adianta peça menor no vão antes de Folha N+1)
  * - packMode group_rows / group_cols: agrupa por arte em fileiras/colunas
+ * - sheetGrowMode auto_height: largura fixa, altura cresce (1 tira, máx. MAX_AUTO_HEIGHT_CM)
  * - Área útil = folha − 2×margem; maxrects usa gapMm; grade/grupos usam gapXMm/gapYMm
  * - Rotação 90° é por arte (ArtItem.rotate90)
  */
@@ -471,6 +588,11 @@ export function packArts(
   options?: PackArtsOptions,
 ): { sheets: PackedSheet[]; errors: string[]; printSizes: ArtPrintSize[] } {
   const skipPreview = options?.skipPreview === true
+  const grow = config.sheetGrowMode === 'auto_height'
+  const packConfig: SheetConfig = grow
+    ? { ...config, heightCm: MAX_AUTO_HEIGHT_CM }
+    : config
+
   const printSizes = arts.map((a) => getArtPrintSize(a, config))
   const errors: string[] = []
 
@@ -487,15 +609,39 @@ export function packArts(
     return { sheets: [], errors, printSizes }
   }
 
-  const mode: PackMode = config.packMode ?? 'maxrects'
+  const mode: PackMode = packConfig.packMode ?? 'maxrects'
+  const marginPx = roundPx(mmToPx(packConfig.marginMm, packConfig.dpi))
 
   let sheets: PackedSheet[]
   if (mode === 'grade') {
-    sheets = packGrade(validArts, validSizes, config, skipPreview)
+    sheets = packGrade(validArts, validSizes, packConfig, skipPreview)
   } else if (mode === 'group_rows' || mode === 'group_cols') {
-    sheets = packGrouped(validArts, validSizes, config, mode, skipPreview)
+    sheets = packGrouped(validArts, validSizes, packConfig, mode, skipPreview)
   } else {
-    sheets = packMaxRects(validArts, validSizes, config, skipPreview, errors)
+    sheets = packMaxRects(validArts, validSizes, packConfig, skipPreview, errors)
+  }
+
+  if (grow) {
+    if (sheets.length === 0) {
+      return { sheets: [], errors, printSizes }
+    }
+    if (sheets.length > 1) {
+      errors.push(
+        `Folha sob medida: o conteúdo não cabe em ${MAX_AUTO_HEIGHT_CM} cm de altura ` +
+          `(geraria ${sheets.length} tiras). Reduza quantidades, tamanho das artes ou aumente a largura.`,
+      )
+      // Ainda assim mostra a 1ª tira encolhida para o usuário ver o progresso
+      const first = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, skipPreview)
+      return { sheets: [first.sheet], errors, printSizes }
+    }
+    const shrunk = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, skipPreview)
+    if (shrunk.overflow) {
+      errors.push(
+        `Folha sob medida: altura usada (${shrunk.sheet.usedHeightCm?.toFixed(1)} cm) ` +
+          `excede o limite de ${MAX_AUTO_HEIGHT_CM} cm.`,
+      )
+    }
+    return { sheets: [shrunk.sheet], errors, printSizes }
   }
 
   return { sheets, errors, printSizes }

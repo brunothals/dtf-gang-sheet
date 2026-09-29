@@ -1,7 +1,13 @@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import type { PackedPlacement, PackedSheet } from '../types'
-import { renderSheetCanvas, renderSheetStrip } from './pack'
+import {
+  getCropRect,
+  renderSheetCanvas,
+  renderSheetStrip,
+  shiftPlacements,
+} from './pack'
+import { mmToPx, roundPx } from './units'
 
 /** Limite seguro por dimensão (fallback se o probe falhar). */
 const FALLBACK_MAX_DIM = 8192
@@ -409,13 +415,64 @@ function isZipBlob(blob: Blob): boolean {
   )
 }
 
+export interface SheetExportOptions {
+  /** Recortar ao bbox das peças + margem (mm). */
+  cropEmpty?: boolean
+  /** Margem ao redor do conteúdo no crop (mm). Default: config.marginMm via caller. */
+  marginMm?: number
+}
+
+/**
+ * Resolve dimensões e placements para export (com ou sem crop de vazios).
+ */
+export function resolveExportGeometry(
+  sheet: PackedSheet,
+  dpi: number,
+  options?: SheetExportOptions,
+): { widthPx: number; heightPx: number; placements: PackedPlacement[] } {
+  const pls = sheet.placements
+  if (!options?.cropEmpty || pls.length === 0) {
+    return { widthPx: sheet.widthPx, heightPx: sheet.heightPx, placements: pls }
+  }
+  const marginMm = options.marginMm ?? 0
+  const marginPx = roundPx(mmToPx(marginMm, dpi))
+  const crop = getCropRect(sheet.widthPx, sheet.heightPx, pls, marginPx)
+  if (!crop) {
+    return { widthPx: sheet.widthPx, heightPx: sheet.heightPx, placements: pls }
+  }
+  return {
+    widthPx: crop.width,
+    heightPx: crop.height,
+    placements: shiftPlacements(pls, crop.x, crop.y),
+  }
+}
+
 export async function sheetToPngBlob(
   sheet: PackedSheet,
   dpi: number,
   placements?: PackedPlacement[],
+  options?: SheetExportOptions,
 ): Promise<Blob> {
-  const pls = placements ?? sheet.placements
-  const { widthPx, heightPx } = sheet
+  let widthPx = sheet.widthPx
+  let heightPx = sheet.heightPx
+  let pls = placements ?? sheet.placements
+
+  if (options?.cropEmpty && placements == null) {
+    const geo = resolveExportGeometry(sheet, dpi, options)
+    widthPx = geo.widthPx
+    heightPx = geo.heightPx
+    pls = geo.placements
+  } else if (placements != null && options?.cropEmpty) {
+    // placements já fornecidos — aplica crop sobre eles com sheet dims
+    const geo = resolveExportGeometry(
+      { ...sheet, placements: pls },
+      dpi,
+      options,
+    )
+    widthPx = geo.widthPx
+    heightPx = geo.heightPx
+    pls = geo.placements
+  }
 
   if (!needsTiledRender(widthPx, heightPx) && tryCreateCanvas(widthPx, heightPx)) {
     try {
@@ -430,12 +487,43 @@ export async function sheetToPngBlob(
   return renderTiledPng(widthPx, heightPx, pls, dpi)
 }
 
+/** Sanitiza nome do cliente para uso em nome de arquivo. */
+export function sanitizeClientFilename(name: string): string {
+  const cleaned = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/[^\w-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+  return cleaned.slice(0, 80)
+}
+
+export function buildSheetFilename(
+  sheet: PackedSheet,
+  totalSheets: number,
+  clientName?: string,
+): string {
+  const prefix = clientName ? sanitizeClientFilename(clientName) : ''
+  const withPrefix = (base: string) => (prefix ? `${prefix}_${base}` : base)
+  if (totalSheets === 1) {
+    return withPrefix('gang.png')
+  }
+  return withPrefix(`folha-${String(sheet.index + 1).padStart(2, '0')}.png`)
+}
+
+export function buildZipFilename(clientName?: string): string {
+  const prefix = clientName ? sanitizeClientFilename(clientName) : ''
+  return prefix ? `${prefix}_folhas.zip` : 'gang-sheets.zip'
+}
+
 export async function downloadSheetPng(
   sheet: PackedSheet,
   dpi: number,
   filename?: string,
+  options?: SheetExportOptions,
 ): Promise<void> {
-  const blob = await sheetToPngBlob(sheet, dpi)
+  const blob = await sheetToPngBlob(sheet, dpi, undefined, options)
   const base = filename ?? `folha-${sheet.index + 1}.png`
   // Detecta ZIP pelo magic PK
   let name = base
@@ -450,19 +538,22 @@ export async function downloadAllSheetsZip(
   sheets: PackedSheet[],
   dpi: number,
   zipName = 'gang-sheets.zip',
+  options?: SheetExportOptions,
+  clientName?: string,
 ): Promise<void> {
   const zip = new JSZip()
+  const prefix = clientName ? sanitizeClientFilename(clientName) : ''
   for (const sheet of sheets) {
-    const blob = await sheetToPngBlob(sheet, dpi)
+    const blob = await sheetToPngBlob(sheet, dpi, undefined, options)
     const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer())
     const nestedZip = head[0] === 0x50 && head[1] === 0x4b
+    const base = prefix
+      ? `${prefix}_folha-${String(sheet.index + 1).padStart(2, '0')}`
+      : `folha-${String(sheet.index + 1).padStart(2, '0')}`
     if (nestedZip) {
-      zip.file(
-        `folha-${String(sheet.index + 1).padStart(2, '0')}-faixas.zip`,
-        blob,
-      )
+      zip.file(`${base}-faixas.zip`, blob)
     } else {
-      zip.file(`folha-${String(sheet.index + 1).padStart(2, '0')}.png`, blob)
+      zip.file(`${base}.png`, blob)
     }
   }
   const content = await zip.generateAsync({ type: 'blob' })
