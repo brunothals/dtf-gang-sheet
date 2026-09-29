@@ -27,8 +27,8 @@ npm run preview
 2. **Recortar** (opcional, ligado por padrão) cada arte ao bounding box do canal alpha — dá para ligar/desligar e ajustar a sensibilidade sem reimportar.
 3. **Dimensionar** no modo *lado maior*: o maior lado da arte vira o valor em cm (padrão **5 cm**); o outro lado proporcional.
 4. Definir **quantidade** por arte.
-5. Escolher **folha** (29×21, 29×42, 29×50, 29×100 cm ou personalizada), **margem**, **espaçamento** e **DPI**. Rotação **90°** é por arte (botão na tabela); todas as cópias da mesma arte ficam na mesma orientação.
-6. **Empacotar** com MaxRects (várias folhas se necessário).
+5. Escolher **folha** (presets ML, rolo DTF, papel A4–A1 ou personalizada; botão para girar orientação), **margem**, **espaçamento** e **DPI**. Nos modos em grupo há **dois gaps** (horizontal e entre linhas/colunas). Rotação **90°** é por arte (botão na tabela).
+6. **Empacotar** com MaxRects ou **Agrupar por arte** (fileiras/colunas, grade rente para tesoura).
 7. **Pré-visualizar** e **exportar** cada folha em PNG (RGBA, fundo transparente) ou **ZIP** com todas. DPI embutido via chunk `pHYs`.
 
 ## Valores padrão
@@ -38,7 +38,8 @@ npm run preview
 | Folha            | 29 × 42 cm  |
 | Lado maior       | 5 cm        |
 | Margem           | 5 mm        |
-| Espaçamento/gap  | 3 mm        |
+| Espaçamento/gap (MaxRects) | 3 mm |
+| Gap X / Gap Y (grupos) | 1 mm / 1 mm |
 | Rotação 90°      | por arte (desligada) |
 | DPI              | 300         |
 | Cortar bordas transparentes | ligado |

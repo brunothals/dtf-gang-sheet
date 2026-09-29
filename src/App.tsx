@@ -116,6 +116,12 @@ export default function App() {
     }
   }
 
+  /** Inverte L×A e marca como personalizado (orientação paisagem/retrato). */
+  const rotateSheetOrientation = () => {
+    setPresetId('custom')
+    setConfig((c) => ({ ...c, widthCm: c.heightCm, heightCm: c.widthCm }))
+  }
+
   // Reprocessar corte sem reimportar quando trim ou sensibilidade mudam
   useEffect(() => {
     const key = `${config.trimEnabled}:${config.alphaThreshold}`
@@ -418,19 +424,27 @@ export default function App() {
             <div>
               <p className="section-kicker">Configuração</p>
               <h2 className="card-title">Folha de impressão</h2>
-              <p className="card-desc">Tamanho, margens, gap e modo de montagem</p>
+              <p className="card-desc">Tamanho, margens, gaps e modo de montagem</p>
             </div>
           </div>
 
           <div className="grid-2">
             <label className="field">
-              <span>Preset</span>
+              <span>Preset da folha</span>
               <select value={presetId} onChange={(e) => onPresetChange(e.target.value)}>
-                {SHEET_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
+                {(['Mercado Livre', 'Rolo DTF', 'Papel', 'Outro'] as const).map((group) => {
+                  const items = SHEET_PRESETS.filter((p) => (p.group ?? 'Outro') === group)
+                  if (items.length === 0) return null
+                  return (
+                    <optgroup key={group} label={group}>
+                      {items.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
               </select>
             </label>
 
@@ -501,6 +515,14 @@ export default function App() {
               />
             </label>
           </div>
+          <div className="row-actions" style={{ marginTop: '-0.35rem', marginBottom: '0.65rem' }}>
+            <button type="button" className="btn secondary sm" onClick={rotateSheetOrientation}>
+              Girar orientação (inverte L×A)
+            </button>
+          </div>
+          <p className="hint" style={{ marginTop: '-0.35rem' }}>
+            Presets em Largura × Altura (cm). Use &quot;Girar orientação&quot; para trocar paisagem/retrato.
+          </p>
 
           <div className="grid-2">
             <label className="field">
@@ -513,17 +535,59 @@ export default function App() {
                 onChange={(e) => updateConfig('marginMm', Number(e.target.value) || 0)}
               />
             </label>
-            <label className="field">
-              <span>Espaçamento / gap (mm)</span>
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={config.gapMm}
-                onChange={(e) => updateConfig('gapMm', Number(e.target.value) || 0)}
-              />
-            </label>
+            {config.packMode === 'maxrects' && (
+              <label className="field">
+                <span>Espaçamento / gap (mm)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={config.gapMm}
+                  onChange={(e) => updateConfig('gapMm', Number(e.target.value) || 0)}
+                />
+              </label>
+            )}
           </div>
+
+          {(config.packMode === 'group_rows' || config.packMode === 'group_cols') && (
+            <div className="grid-2">
+              <label className="field">
+                <span>
+                  {config.packMode === 'group_rows'
+                    ? 'Espaçamento horizontal (mm)'
+                    : 'Espaçamento entre colunas (mm)'}
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={config.gapXMm}
+                  onChange={(e) => updateConfig('gapXMm', Number(e.target.value) || 0)}
+                />
+              </label>
+              <label className="field">
+                <span>
+                  {config.packMode === 'group_rows'
+                    ? 'Espaçamento entre linhas (mm)'
+                    : 'Espaçamento vertical na coluna (mm)'}
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={config.gapYMm}
+                  onChange={(e) => updateConfig('gapYMm', Number(e.target.value) || 0)}
+                />
+              </label>
+            </div>
+          )}
+          {(config.packMode === 'group_rows' || config.packMode === 'group_cols') && (
+            <p className="hint">
+              Com fileiras/colunas, use gaps X e Y baixos (ex.: 1 mm) para uma grade rente, fácil de
+              cortar com tesoura — como no Organizador Nesting. No modo &quot;Aproveitar espaço&quot;
+              vale o gap único.
+            </p>
+          )}
 
           <fieldset className="pack-mode">
             <legend>Modo de montagem</legend>
@@ -556,7 +620,8 @@ export default function App() {
             </label>
             <p className="hint">
               Fileiras/colunas mantêm a mesma arte junta para facilitar o recorte com
-              tesoura. &quot;Aproveitar espaço&quot; usa MaxRects e pode misturar artes.
+              tesoura (grade rente com gaps X/Y). &quot;Aproveitar espaço&quot; usa MaxRects e
+              pode misturar artes.
             </p>
           </fieldset>
 

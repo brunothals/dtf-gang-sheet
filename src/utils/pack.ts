@@ -139,7 +139,11 @@ function packGrouped(
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
   const sheetH = roundPx(cmToPx(config.heightCm, config.dpi))
   const marginPx = roundPx(mmToPx(config.marginMm, config.dpi))
-  const gapPx = roundPx(mmToPx(config.gapMm, config.dpi))
+  // Dual gaps: fallback to gapMm when gapX/gapY absent (configs antigas)
+  const gapXMm = config.gapXMm ?? config.gapMm
+  const gapYMm = config.gapYMm ?? config.gapMm
+  const gapXPx = roundPx(mmToPx(gapXMm, config.dpi))
+  const gapYPx = roundPx(mmToPx(gapYMm, config.dpi))
   const usableW = Math.max(1, sheetW - 2 * marginPx)
   const usableH = Math.max(1, sheetH - 2 * marginPx)
 
@@ -150,6 +154,10 @@ function packGrouped(
   let along = 0 // rowX (rows) or colY (cols) — progress inside current strip
 
   const isRows = mode === 'group_rows'
+  // group_rows: gapX between items in a row, gapY between rows
+  // group_cols: gapY between items in a column, gapX between columns
+  const gapAlongPx = isRows ? gapXPx : gapYPx
+  const gapCrossPx = isRows ? gapYPx : gapXPx
 
   const newSheet = () => {
     finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
@@ -181,7 +189,7 @@ function packGrouped(
     for (let q = 0; q < qty; q++) {
       // Wrap within same art when strip is full along the primary axis
       if (along + pieceAlong > usableAlong) {
-        stripPos += stripSize + gapPx
+        stripPos += stripSize + gapCrossPx
         along = 0
       }
 
@@ -204,11 +212,11 @@ function packGrouped(
         source: art.trimmedCanvas,
       })
 
-      along += pieceAlong + gapPx
+      along += pieceAlong + gapAlongPx
     }
 
     // After art finishes: advance to a fresh strip for the next art
-    stripPos += stripSize + gapPx
+    stripPos += stripSize + gapCrossPx
     along = 0
   }
 
@@ -302,7 +310,7 @@ function packMaxRects(
  * Empacota artes em folhas.
  * - packMode maxrects: MaxRects (multi-bin), pode misturar artes
  * - packMode group_rows / group_cols: agrupa por arte em fileiras/colunas
- * - Área útil = folha − 2×margem; gap entre peças
+ * - Área útil = folha − 2×margem; maxrects usa gapMm; grupos usam gapXMm/gapYMm
  * - Rotação 90° é por arte (ArtItem.rotate90)
  */
 export function packArts(
