@@ -8,7 +8,7 @@ export interface SheetPreset {
 }
 
 /** Modo de montagem das peças na folha. */
-export type PackMode = 'maxrects' | 'group_rows' | 'group_cols'
+export type PackMode = 'maxrects' | 'grade' | 'group_rows' | 'group_cols'
 
 export interface SheetConfig {
   widthCm: number
@@ -16,16 +16,16 @@ export interface SheetConfig {
   marginMm: number
   /**
    * Gap único usado pelo modo maxrects (aproveitar espaço).
-   * Nos modos em grupo, prefira gapXMm / gapYMm.
+   * Nos modos grade / group_*, prefira gapXMm / gapYMm.
    */
   gapMm: number
   /**
-   * Espaçamento horizontal (mm) — entre peças na fileira (group_rows)
+   * Espaçamento horizontal (mm) — entre peças na fileira (grade / group_rows)
    * ou entre colunas (group_cols).
    */
   gapXMm: number
   /**
-   * Espaçamento entre linhas (group_rows) ou entre peças na coluna (group_cols).
+   * Espaçamento entre linhas (grade / group_rows) ou entre peças na coluna (group_cols).
    */
   gapYMm: number
   /**
@@ -35,7 +35,8 @@ export interface SheetConfig {
   allowRotation: boolean
   /**
    * maxrects = aproveitar espaço (MaxRects, pode misturar artes).
-   * group_rows / group_cols = agrupar por arte em fileiras/colunas (recorte com tesoura).
+   * grade = shelf packing de todas as cópias (esquerda→direita, próxima linha; como Organizador Nesting).
+   * group_rows / group_cols = agrupar por arte em fileiras/colunas (mesma arte junta).
    */
   packMode: PackMode
   /**

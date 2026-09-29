@@ -126,6 +126,113 @@ function finalizeSheet(
 }
 
 /**
+ * Grade (shelf packing): coloca TODAS as cópias na ordem da lista,
+ * esquerda→direita, quebrando linha quando não cabe. NÃO força nova
+ * fileira ao mudar de arte. Altura da linha = max altura das peças nela.
+ * gapXMm entre peças; gapYMm entre linhas.
+ * Só abre Folha N+1 quando a peça não cabe na fileira atual NEM numa nova
+ * fileira na mesma folha (enche a folha antes de criar outra).
+ * Sem rotação livre (só ArtItem.rotate90 já refletido em print sizes).
+ */
+function packGrade(
+  validArts: ArtItem[],
+  validSizes: ArtPrintSize[],
+  config: SheetConfig,
+  skipPreview: boolean,
+): PackedSheet[] {
+  const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
+  const sheetH = roundPx(cmToPx(config.heightCm, config.dpi))
+  const marginPx = roundPx(mmToPx(config.marginMm, config.dpi))
+  const gapXMm = config.gapXMm ?? config.gapMm
+  const gapYMm = config.gapYMm ?? config.gapMm
+  const gapXPx = roundPx(mmToPx(gapXMm, config.dpi))
+  const gapYPx = roundPx(mmToPx(gapYMm, config.dpi))
+  const usableW = Math.max(1, sheetW - 2 * marginPx)
+  const usableH = Math.max(1, sheetH - 2 * marginPx)
+
+  // Expand qty in list order
+  type Piece = {
+    artId: string
+    name: string
+    width: number
+    height: number
+    rotated: boolean
+    source: HTMLCanvasElement
+  }
+  const pieces: Piece[] = []
+  for (let i = 0; i < validArts.length; i++) {
+    const art = validArts[i]
+    const ps = validSizes[i]
+    const qty = Math.max(0, Math.floor(art.quantity) || 0)
+    for (let q = 0; q < qty; q++) {
+      pieces.push({
+        artId: art.id,
+        name: art.name,
+        width: ps.widthPx,
+        height: ps.heightPx,
+        rotated: ps.rotated,
+        source: art.trimmedCanvas,
+      })
+    }
+  }
+
+  if (pieces.length === 0) return []
+
+  const sheets: PackedSheet[] = []
+  let placements: PackedPlacement[] = []
+  let cursorX = 0
+  let cursorY = 0
+  let rowHeight = 0
+
+  const newSheet = () => {
+    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+    placements = []
+    cursorX = 0
+    cursorY = 0
+    rowHeight = 0
+  }
+
+  for (const piece of pieces) {
+    // 1) Fit on current row if remaining width allows.
+    // 2) Else try next row on SAME sheet (fill before opening Folha N+1).
+    // 3) Only new sheet when the piece cannot fit on any remaining row.
+    const fitsOnCurrentRow = cursorX === 0 || cursorX + piece.width <= usableW
+    if (!fitsOnCurrentRow) {
+      const nextRowY = cursorY + rowHeight + gapYPx
+      if (nextRowY + piece.height <= usableH) {
+        // Wrap — still room on this sheet
+        cursorY = nextRowY
+        cursorX = 0
+        rowHeight = 0
+      } else {
+        // No remaining row can hold this piece → Folha N+1
+        newSheet()
+      }
+    } else if (cursorY + piece.height > usableH) {
+      // Fits width-wise but not height from current row origin → new sheet
+      newSheet()
+    }
+
+    placements.push({
+      artId: piece.artId,
+      name: piece.name,
+      x: marginPx + cursorX,
+      y: marginPx + cursorY,
+      width: piece.width,
+      height: piece.height,
+      rotated: piece.rotated,
+      source: piece.source,
+    })
+
+    cursorX += piece.width + gapXPx
+    if (piece.height > rowHeight) rowHeight = piece.height
+  }
+
+  finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+  return sheets
+}
+
+/**
  * Agrupa por arte em fileiras (group_rows) ou colunas (group_cols).
  * Não mistura artIds na mesma fileira/coluna; cada arte começa em strip nova.
  */
@@ -180,20 +287,27 @@ function packGrouped(
     const usableAlong = isRows ? usableW : usableH
     const usableCross = isRows ? usableH : usableW
 
-    // If this art's strip doesn't fit in remaining cross-axis space → new sheet
-    // (previous art always advanced stripPos so we never sit beside its leftover)
+    // New sheet only if this art's strip cannot fit in remaining cross-axis space
+    // (still fill the sheet — do not open Folha N+1 while a strip still fits)
     if (stripPos + stripSize > usableCross) {
       newSheet()
     }
 
     for (let q = 0; q < qty; q++) {
       // Wrap within same art when strip is full along the primary axis
-      if (along + pieceAlong > usableAlong) {
-        stripPos += stripSize + gapCrossPx
-        along = 0
+      if (along > 0 && along + pieceAlong > usableAlong) {
+        const nextStrip = stripPos + stripSize + gapCrossPx
+        if (nextStrip + stripSize <= usableCross) {
+          // Next strip still fits on this sheet — fill before new sheet
+          stripPos = nextStrip
+          along = 0
+        } else {
+          // No remaining strip room for this piece → Folha N+1
+          newSheet()
+        }
       }
 
-      // Need new sheet if strip no longer fits
+      // Safety: if somehow strip still doesn't fit (e.g. after newSheet), reset already done
       if (stripPos + stripSize > usableCross) {
         newSheet()
       }
@@ -215,9 +329,12 @@ function packGrouped(
       along += pieceAlong + gapAlongPx
     }
 
-    // After art finishes: advance to a fresh strip for the next art
-    stripPos += stripSize + gapCrossPx
-    along = 0
+    // After art finishes: next art starts on a fresh strip (same art stays together).
+    // Do not open a new sheet here — next art checks whether its strip still fits.
+    if (qty > 0) {
+      stripPos += stripSize + gapCrossPx
+      along = 0
+    }
   }
 
   finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
@@ -309,8 +426,9 @@ function packMaxRects(
 /**
  * Empacota artes em folhas.
  * - packMode maxrects: MaxRects (multi-bin), pode misturar artes
+ * - packMode grade: shelf packing de todas as cópias (L→R, wrap; não força nova linha por arte)
  * - packMode group_rows / group_cols: agrupa por arte em fileiras/colunas
- * - Área útil = folha − 2×margem; maxrects usa gapMm; grupos usam gapXMm/gapYMm
+ * - Área útil = folha − 2×margem; maxrects usa gapMm; grade/grupos usam gapXMm/gapYMm
  * - Rotação 90° é por arte (ArtItem.rotate90)
  */
 export function packArts(
@@ -338,7 +456,9 @@ export function packArts(
   const mode: PackMode = config.packMode ?? 'maxrects'
 
   let sheets: PackedSheet[]
-  if (mode === 'group_rows' || mode === 'group_cols') {
+  if (mode === 'grade') {
+    sheets = packGrade(validArts, validSizes, config, skipPreview)
+  } else if (mode === 'group_rows' || mode === 'group_cols') {
     sheets = packGrouped(validArts, validSizes, config, mode, skipPreview)
   } else {
     sheets = packMaxRects(validArts, validSizes, config, skipPreview, errors)

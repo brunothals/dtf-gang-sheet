@@ -549,13 +549,15 @@ export default function App() {
             )}
           </div>
 
-          {(config.packMode === 'group_rows' || config.packMode === 'group_cols') && (
+          {(config.packMode === 'grade' ||
+            config.packMode === 'group_rows' ||
+            config.packMode === 'group_cols') && (
             <div className="grid-2">
               <label className="field">
                 <span>
-                  {config.packMode === 'group_rows'
-                    ? 'Espaçamento horizontal (mm)'
-                    : 'Espaçamento entre colunas (mm)'}
+                  {config.packMode === 'group_cols'
+                    ? 'Espaçamento entre colunas (mm)'
+                    : 'Espaçamento horizontal (mm)'}
                 </span>
                 <input
                   type="number"
@@ -567,9 +569,9 @@ export default function App() {
               </label>
               <label className="field">
                 <span>
-                  {config.packMode === 'group_rows'
-                    ? 'Espaçamento entre linhas (mm)'
-                    : 'Espaçamento vertical na coluna (mm)'}
+                  {config.packMode === 'group_cols'
+                    ? 'Espaçamento vertical na coluna (mm)'
+                    : 'Espaçamento entre linhas (mm)'}
                 </span>
                 <input
                   type="number"
@@ -581,11 +583,12 @@ export default function App() {
               </label>
             </div>
           )}
-          {(config.packMode === 'group_rows' || config.packMode === 'group_cols') && (
+          {(config.packMode === 'grade' ||
+            config.packMode === 'group_rows' ||
+            config.packMode === 'group_cols') && (
             <p className="hint">
-              Com fileiras/colunas, use gaps X e Y baixos (ex.: 1 mm) para uma grade rente, fácil de
-              cortar com tesoura — como no Organizador Nesting. No modo &quot;Aproveitar espaço&quot;
-              vale o gap único.
+              Use gaps X e Y baixos (ex.: 1 mm) para uma grade rente — como no Organizador
+              Nesting. No modo &quot;Aproveitar espaço&quot; vale o gap único.
             </p>
           )}
 
@@ -604,10 +607,19 @@ export default function App() {
               <input
                 type="radio"
                 name="packMode"
+                checked={config.packMode === 'grade'}
+                onChange={() => updateConfig('packMode', 'grade')}
+              />
+              <span>Grade — linhas e colunas</span>
+            </label>
+            <label className="radio">
+              <input
+                type="radio"
+                name="packMode"
                 checked={config.packMode === 'group_rows'}
                 onChange={() => updateConfig('packMode', 'group_rows')}
               />
-              <span>Agrupar por arte — fileiras</span>
+              <span>Agrupar por arte — fileiras (mesma arte junta)</span>
             </label>
             <label className="radio">
               <input
@@ -616,12 +628,13 @@ export default function App() {
                 checked={config.packMode === 'group_cols'}
                 onChange={() => updateConfig('packMode', 'group_cols')}
               />
-              <span>Agrupar por arte — colunas</span>
+              <span>Agrupar por arte — colunas (mesma arte junta)</span>
             </label>
             <p className="hint">
-              Fileiras/colunas mantêm a mesma arte junta para facilitar o recorte com
-              tesoura (grade rente com gaps X/Y). &quot;Aproveitar espaço&quot; usa MaxRects e
-              pode misturar artes.
+              <strong>Grade</strong> = como Organizador Nesting (rente, enche a largura
+              esquerda→direita e sobe de linha; mistura artes; só abre nova folha quando a
+              peça não cabe mais na atual). Agrupar mantém a mesma arte junta para recorte
+              com tesoura. &quot;Aproveitar espaço&quot; usa MaxRects e pode misturar artes.
             </p>
           </fieldset>
 
