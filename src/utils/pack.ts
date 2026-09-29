@@ -126,13 +126,17 @@ function finalizeSheet(
 }
 
 /**
- * Grade (shelf packing): coloca TODAS as cópias na ordem da lista,
- * esquerda→direita, quebrando linha quando não cabe. NÃO força nova
- * fileira ao mudar de arte. Altura da linha = max altura das peças nela.
- * gapXMm entre peças; gapYMm entre linhas.
- * Só abre Folha N+1 quando a peça não cabe na fileira atual NEM numa nova
- * fileira na mesma folha (enche a folha antes de criar outra).
- * Sem rotação livre (só ArtItem.rotate90 já refletido em print sizes).
+ * Grade (shelf packing, fileiras alinhadas): coloca cópias esquerda→direita
+ * em fileiras de mesma baseline (altura da fileira = max das peças nela).
+ * gapXMm entre peças; gapYMm entre fileiras. Sem rotação livre.
+ *
+ * First-fit com adiamento: se a próxima peça da lista não cabe na fileira
+ * atual (nem em largura restante nem em altura a partir da baseline), procura
+ * a *primeira* peça restante que caiba nesse vão — mantém fileiras retas e
+ * preenche o canto inferior-direito antes de abrir Folha N+1. Só cria nova
+ * folha quando nenhuma peça restante cabe na fileira atual nem numa nova
+ * fileira alinhada na mesma folha. Não enfia peças em “buracos” no meio da
+ * folha (sem free-rect caótico).
  */
 function packGrade(
   validArts: ArtItem[],
@@ -150,7 +154,6 @@ function packGrade(
   const usableW = Math.max(1, sheetW - 2 * marginPx)
   const usableH = Math.max(1, sheetH - 2 * marginPx)
 
-  // Expand qty in list order
   type Piece = {
     artId: string
     name: string
@@ -179,56 +182,87 @@ function packGrade(
   if (pieces.length === 0) return []
 
   const sheets: PackedSheet[] = []
-  let placements: PackedPlacement[] = []
-  let cursorX = 0
-  let cursorY = 0
-  let rowHeight = 0
+  let remaining = pieces
 
-  const newSheet = () => {
-    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
-    placements = []
-    cursorX = 0
-    cursorY = 0
-    rowHeight = 0
+  const fitsOnRow = (
+    piece: Piece,
+    cursorX: number,
+    cursorY: number,
+  ): boolean => {
+    if (piece.width > usableW) return false
+    if (cursorY + piece.height > usableH) return false
+    if (cursorX === 0) return true
+    return cursorX + piece.width <= usableW
   }
 
-  for (const piece of pieces) {
-    // 1) Fit on current row if remaining width allows.
-    // 2) Else try next row on SAME sheet (fill before opening Folha N+1).
-    // 3) Only new sheet when the piece cannot fit on any remaining row.
-    const fitsOnCurrentRow = cursorX === 0 || cursorX + piece.width <= usableW
-    if (!fitsOnCurrentRow) {
-      const nextRowY = cursorY + rowHeight + gapYPx
-      if (nextRowY + piece.height <= usableH) {
-        // Wrap — still room on this sheet
-        cursorY = nextRowY
-        cursorX = 0
-        rowHeight = 0
-      } else {
-        // No remaining row can hold this piece → Folha N+1
-        newSheet()
-      }
-    } else if (cursorY + piece.height > usableH) {
-      // Fits width-wise but not height from current row origin → new sheet
-      newSheet()
+  while (remaining.length > 0) {
+    const placements: PackedPlacement[] = []
+    let cursorX = 0
+    let cursorY = 0
+    let rowHeight = 0
+    const queue = remaining.slice()
+    remaining = []
+
+    const place = (piece: Piece) => {
+      placements.push({
+        artId: piece.artId,
+        name: piece.name,
+        x: marginPx + cursorX,
+        y: marginPx + cursorY,
+        width: piece.width,
+        height: piece.height,
+        rotated: piece.rotated,
+        source: piece.source,
+      })
+      cursorX += piece.width + gapXPx
+      if (piece.height > rowHeight) rowHeight = piece.height
     }
 
-    placements.push({
-      artId: piece.artId,
-      name: piece.name,
-      x: marginPx + cursorX,
-      y: marginPx + cursorY,
-      width: piece.width,
-      height: piece.height,
-      rotated: piece.rotated,
-      source: piece.source,
-    })
+    // Fill this sheet: always prefer current row leftover, then a new aligned row.
+    while (queue.length > 0) {
+      let idx = queue.findIndex((p) => fitsOnRow(p, cursorX, cursorY))
+      if (idx >= 0) {
+        place(queue.splice(idx, 1)[0])
+        continue
+      }
 
-    cursorX += piece.width + gapXPx
-    if (piece.height > rowHeight) rowHeight = piece.height
+      // No remaining piece fits this row — try one new aligned row below.
+      if (rowHeight > 0) {
+        const nextRowY = cursorY + rowHeight + gapYPx
+        idx = queue.findIndex(
+          (p) =>
+            p.width <= usableW &&
+            nextRowY + p.height <= usableH,
+        )
+        if (idx >= 0) {
+          cursorY = nextRowY
+          cursorX = 0
+          rowHeight = 0
+          place(queue.splice(idx, 1)[0])
+          continue
+        }
+      }
+
+      // Nothing else fits on this sheet with neat shelf rows.
+      break
+    }
+
+    remaining = queue
+
+    if (placements.length === 0) {
+      // Safety: empty sheet + leftover (should not happen for valid arts).
+      // Force the head piece onto its own sheet to avoid an infinite loop.
+      const piece = remaining.shift()
+      if (!piece) break
+      cursorX = 0
+      cursorY = 0
+      rowHeight = 0
+      place(piece)
+    }
+
+    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
   }
 
-  finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
   return sheets
 }
 
@@ -426,7 +460,7 @@ function packMaxRects(
 /**
  * Empacota artes em folhas.
  * - packMode maxrects: MaxRects (multi-bin), pode misturar artes
- * - packMode grade: shelf packing de todas as cópias (L→R, wrap; não força nova linha por arte)
+ * - packMode grade: shelf first-fit (fileiras alinhadas; adianta peça menor no vão antes de Folha N+1)
  * - packMode group_rows / group_cols: agrupa por arte em fileiras/colunas
  * - Área útil = folha − 2×margem; maxrects usa gapMm; grade/grupos usam gapXMm/gapYMm
  * - Rotação 90° é por arte (ArtItem.rotate90)

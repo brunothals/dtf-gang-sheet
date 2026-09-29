@@ -35,7 +35,7 @@ export interface SheetConfig {
   allowRotation: boolean
   /**
    * maxrects = aproveitar espaço (MaxRects, pode misturar artes).
-   * grade = shelf packing de todas as cópias (esquerda→direita, próxima linha; como Organizador Nesting).
+   * grade = shelf first-fit em fileiras alinhadas (preenche vão da fileira antes de Folha N+1; como Organizador Grade).
    * group_rows / group_cols = agrupar por arte em fileiras/colunas (mesma arte junta).
    */
   packMode: PackMode
