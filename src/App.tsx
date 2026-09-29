@@ -8,8 +8,13 @@ import {
   type PackedSheet,
   type SheetConfig,
 } from './types'
-import { applyTrim, loadPngAsCanvas } from './utils/trim'
-import { getArtPrintSize, packArts } from './utils/pack'
+import {
+  applyTrim,
+  IMPORT_WARN_MAX_SIDE_PX,
+  loadPngAsCanvas,
+  makeThumbnailDataUrl,
+} from './utils/trim'
+import { buildPreviewUrl, getArtPrintSize, packArts } from './utils/pack'
 import {
   fillLeftoverQuantities,
   maxEqualQtyOnOneSheet,
@@ -23,6 +28,13 @@ import {
 } from './utils/exportPng'
 import { computeNativeExportDpi, resolveExportDpi } from './utils/units'
 import './App.css'
+
+/** DPI máximo para packing/preview ao vivo (export reempacota no DPI nativo). */
+const PREVIEW_DPI_CAP = 150
+/** Debounce do packing ao vivo (ms). */
+const PACK_DEBOUNCE_MS = 320
+/** Quantas folhas geram previewUrl de uma vez (resto sob demanda). */
+const MAX_LIVE_PREVIEW_SHEETS = 6
 
 function uid(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -50,18 +62,71 @@ function buildArtItem(
     trimmedCanvas: trimmed.canvas,
     trimmedWidthPx: trimmed.width,
     trimmedHeightPx: trimmed.height,
-    thumbnailUrl: trimmed.canvas.toDataURL('image/png'),
+    // Thumbnail pequeno — nunca toDataURL da arte em resolução plena (OOM)
+    thumbnailUrl: makeThumbnailDataUrl(trimmed.canvas, trimmed.width, trimmed.height),
     quantity,
     maxSideCmOverride,
     rotate90,
   }
 }
 
+function artDupKey(name: string, size: number): string {
+  return `${name.toLowerCase()}::${size}`
+}
+
 function formatPxSize(w: number, h: number): string {
   return `${w}×${h}`
 }
 
+function LazySheetPreview({
+  sheet,
+  alt,
+}: {
+  sheet: PackedSheet
+  alt: string
+}) {
+  const [url, setUrl] = useState(sheet.previewUrl)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setUrl(sheet.previewUrl)
+    setFailed(false)
+  }, [sheet.previewUrl, sheet.index, sheet.widthPx, sheet.heightPx])
+
+  useEffect(() => {
+    if (url || failed) return
+    let cancelled = false
+    // Gera preview sob demanda (fora do packing em lote)
+    const t = window.setTimeout(() => {
+      try {
+        const next = buildPreviewUrl(sheet.widthPx, sheet.heightPx, sheet.placements)
+        if (!cancelled) {
+          if (next) setUrl(next)
+          else setFailed(true)
+        }
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    }, 50)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [url, failed, sheet])
+
+  if (url) {
+    return <img src={url} alt={alt} />
+  }
+  if (failed) {
+    return (
+      <p className="empty">Preview indisponível (folha muito grande ou falta de memória)</p>
+    )
+  }
+  return <p className="empty">Gerando preview…</p>
+}
+
 export default function App() {
+
   const [config, setConfig] = useState<SheetConfig>({ ...DEFAULT_CONFIG })
   const [presetId, setPresetId] = useState('29x42')
   const [arts, setArts] = useState<ArtItem[]>([])
@@ -74,9 +139,15 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
   /** Prefixo opcional nos arquivos exportados */
   const [clientName, setClientName] = useState('')
+  /** Pular PNGs com mesmo nome+tamanho já na lista */
+  const [skipDuplicateNames, setSkipDuplicateNames] = useState(true)
+  /** Erro fatal de packing/preview (canvas OOM etc.) */
+  const [packFatalError, setPackFatalError] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
+  /** artId → chave nome::tamanho para skip de duplicatas */
+  const artDupKeyByIdRef = useRef<Map<string, string>>(new Map())
 
   // Evita re-trim na montagem inicial / só reprocessa quando trim ou limiar mudam
   const trimKeyRef = useRef(`${config.trimEnabled}:${config.alphaThreshold}`)
@@ -156,24 +227,55 @@ export default function App() {
   }, [config.trimEnabled, config.alphaThreshold])
 
   const importFiles = async (fileList: FileList | File[]) => {
-    const files = Array.from(fileList).filter(
+    const all = Array.from(fileList)
+    const files = all.filter(
       (f) =>
-        f.type === 'image/png' ||
-        f.name.toLowerCase().endsWith('.png'),
+        f.size > 0 &&
+        (f.type === 'image/png' || f.name.toLowerCase().endsWith('.png')),
     )
+    const skippedNonPng = all.length - files.length
     if (files.length === 0) {
-      setStatus('Nenhum PNG encontrado.')
+      setStatus(
+        skippedNonPng > 0
+          ? `Nenhum PNG válido (ignorados ${skippedNonPng} não-PNG/vazios).`
+          : 'Nenhum PNG encontrado.',
+      )
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (folderInputRef.current) folderInputRef.current.value = ''
       return
     }
     setLoading(true)
     setStatus(`Processando ${files.length} arquivo(s)…`)
-    try {
-      const next: ArtItem[] = []
-      let anyCropped = false
-      for (const file of files) {
+    const next: ArtItem[] = []
+    const failures: string[] = []
+    const largeWarns: string[] = []
+    let anyCropped = false
+    let skippedDup = 0
+
+    // Chaves já existentes + do lote atual
+    const seen = new Set<string>()
+    if (skipDuplicateNames) {
+      for (const k of artDupKeyByIdRef.current.values()) seen.add(k)
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setStatus(`Processando ${i + 1}/${files.length}: ${file.name}`)
+      const key = artDupKey(file.name, file.size)
+      if (skipDuplicateNames && seen.has(key)) {
+        skippedDup++
+        continue
+      }
+      try {
         const loaded = await loadPngAsCanvas(file)
+        if (loaded.warnLarge) {
+          largeWarns.push(
+            `${loaded.name} (${loaded.width}×${loaded.height} px > ${IMPORT_WARN_MAX_SIDE_PX})`,
+          )
+        }
+        const id = uid()
         const art = buildArtItem(
-          uid(),
+          id,
           loaded.name,
           loaded.canvas,
           loaded.width,
@@ -189,25 +291,43 @@ export default function App() {
           anyCropped = true
         }
         next.push(art)
+        seen.add(key)
+        artDupKeyByIdRef.current.set(id, key)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        failures.push(`${file.name}: ${msg}`)
+        console.warn('Falha ao importar', file.name, e)
       }
-      setArts((prev) => [...prev, ...next])
-      // Sincroniza a chave para não reprocessar de novo no efeito
-      trimKeyRef.current = `${config.trimEnabled}:${config.alphaThreshold}`
-      if (anyCropped) {
-        setStatus(`${next.length} arte(s) importada(s) (bordas transparentes cortadas).`)
-      } else {
-        setStatus(`${next.length} arte(s) importada(s).`)
-      }
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : 'Erro ao importar.')
-    } finally {
-      setLoading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-      if (folderInputRef.current) folderInputRef.current.value = ''
     }
+
+    if (next.length > 0) {
+      setArts((prev) => [...prev, ...next])
+      trimKeyRef.current = `${config.trimEnabled}:${config.alphaThreshold}`
+    }
+
+    const parts: string[] = []
+    parts.push(`${next.length} ok`)
+    if (failures.length > 0) {
+      const detail = failures.slice(0, 3).join('; ')
+      const more = failures.length > 3 ? ` (+${failures.length - 3})` : ''
+      parts.push(`${failures.length} falharam: ${detail}${more}`)
+    }
+    if (skippedDup > 0) parts.push(`${skippedDup} duplicata(s) ignorada(s)`)
+    if (skippedNonPng > 0) parts.push(`${skippedNonPng} não-PNG/vazio(s)`)
+    if (anyCropped) parts.push('bordas transparentes cortadas')
+    if (largeWarns.length > 0) {
+      parts.push(
+        `aviso: ${largeWarns.length} arte(s) > ${IMPORT_WARN_MAX_SIDE_PX}px (qualidade de export mantida)`,
+      )
+    }
+    setStatus(parts.join(' · '))
+    setLoading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (folderInputRef.current) folderInputRef.current.value = ''
   }
 
   const removeArt = (id: string) => {
+    artDupKeyByIdRef.current.delete(id)
     setArts((prev) => prev.filter((a) => a.id !== id))
   }
 
@@ -216,7 +336,9 @@ export default function App() {
     setSelectedIds({})
     setSheets([])
     setPackErrors([])
+    setPackFatalError(null)
     setStatus('')
+    artDupKeyByIdRef.current.clear()
   }
 
   const toggleSelect = (id: string) => {
@@ -234,7 +356,8 @@ export default function App() {
   const handleEncherFolha = (id: string) => {
     const art = arts.find((a) => a.id === id)
     if (!art) return
-    const q = maxQtyOneArtOnOneSheet(art, config)
+    const dpi = resolveExportDpi(arts, config)
+    const q = maxQtyOneArtOnOneSheet(art, { ...config, dpi })
     setArts((prev) => prev.map((a) => (a.id === id ? { ...a, quantity: q } : a)))
     setStatus(
       q > 0
@@ -245,12 +368,14 @@ export default function App() {
 
   const handleDividirIguais = () => {
     const selected = arts.filter((a) => selectedIds[a.id])
-    const fitting = selected.filter((a) => !getArtPrintSize(a, config).error)
+    const dpi = resolveExportDpi(arts, config)
+    const cfg = { ...config, dpi }
+    const fitting = selected.filter((a) => !getArtPrintSize(a, cfg).error)
     if (fitting.length === 0) {
       setStatus('Dividir iguais: selecione ao menos uma arte que caiba na folha.')
       return
     }
-    const q = maxEqualQtyOnOneSheet(fitting, config)
+    const q = maxEqualQtyOnOneSheet(fitting, cfg)
     const ids = new Set(fitting.map((a) => a.id))
     setArts((prev) => prev.map((a) => (ids.has(a.id) ? { ...a, quantity: q } : a)))
     if (fitting.length === 1) {
@@ -269,14 +394,16 @@ export default function App() {
   }
 
   const handlePreencherSobras = () => {
+    const dpi = resolveExportDpi(arts, config)
+    const cfg = { ...config, dpi }
     const hasOrdered = arts.some(
-      (a) => a.quantity >= 1 && !getArtPrintSize(a, config).error,
+      (a) => a.quantity >= 1 && !getArtPrintSize(a, cfg).error,
     )
     if (!hasOrdered) {
       setStatus('Sobras: defina primeiro as quantidades do pedido (≥ 1).')
       return
     }
-    const result = fillLeftoverQuantities(arts, config)
+    const result = fillLeftoverQuantities(arts, cfg)
     setArts(result.arts)
     if (result.sheetsBefore === 0) {
       setStatus('Sobras: nenhuma folha gerada ainda.')
@@ -351,11 +478,25 @@ export default function App() {
     [arts, config],
   )
 
-  /** Config usada no packing/export — dpi = efetivo. */
-  const packConfig = useMemo(
+  /** Config de export — dpi nativo/forçado completo. */
+  const exportPackConfig = useMemo(
     () => ({ ...config, dpi: effectiveDpi }),
     [config, effectiveDpi],
   )
+
+  /** DPI baixo só para packing + preview ao vivo (evita OOM ~780 DPI). */
+  const previewDpi = useMemo(
+    () => Math.min(effectiveDpi, PREVIEW_DPI_CAP),
+    [effectiveDpi],
+  )
+
+  const previewPackConfig = useMemo(
+    () => ({ ...config, dpi: previewDpi }),
+    [config, previewDpi],
+  )
+
+  /** packConfig = preview (lista de tamanhos W×H cm usa as mesmas medidas em cm). */
+  const packConfig = previewPackConfig
 
   const artRows = useMemo(() => {
     return arts.map((art) => {
@@ -364,17 +505,41 @@ export default function App() {
     })
   }, [arts, packConfig])
 
-  // Empacotar quando artes ou config mudam
+  // Empacotar com debounce + DPI de preview (export reempacota no DPI nativo)
   useEffect(() => {
     if (arts.length === 0) {
       setSheets([])
       setPackErrors([])
+      setPackFatalError(null)
       return
     }
-    const { sheets: packed, errors } = packArts(arts, packConfig)
-    setSheets(packed)
-    setPackErrors(errors)
-  }, [arts, packConfig])
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      try {
+        const { sheets: packed, errors } = packArts(arts, previewPackConfig, {
+          maxPreviewSheets: MAX_LIVE_PREVIEW_SHEETS,
+        })
+        if (cancelled) return
+        setSheets(packed)
+        setPackErrors(errors)
+        setPackFatalError(null)
+      } catch (e) {
+        if (cancelled) return
+        console.error(e)
+        setSheets([])
+        setPackErrors([])
+        setPackFatalError(
+          e instanceof Error
+            ? e.message
+            : 'Falha ao montar a folha (possível falta de memória). Reduza artes ou use DPI forçado menor.',
+        )
+      }
+    }, PACK_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [arts, previewPackConfig])
 
   const exportOpts = useMemo(
     () => ({
@@ -384,12 +549,27 @@ export default function App() {
     [config.cropEmptyExport, config.marginMm],
   )
 
+  /** Reempacota no DPI nativo para export (preview usa DPI limitado). */
+  const packForExport = (): PackedSheet[] => {
+    const { sheets: packed, errors } = packArts(arts, exportPackConfig, {
+      skipPreview: true,
+    })
+    if (errors.length > 0 && packed.length === 0) {
+      throw new Error(errors[0] ?? 'Nada para exportar.')
+    }
+    return packed
+  }
+
   const handleExportOne = async (sheet: PackedSheet) => {
     setExporting(true)
     setStatus(`Exportando folha ${sheet.index + 1} em ~${effectiveDpi} DPI (qualidade do PNG)…`)
     try {
-      const filename = buildSheetFilename(sheet, sheets.length, clientName)
-      await downloadSheetPng(sheet, effectiveDpi, filename, exportOpts)
+      const exportSheets = packForExport()
+      const target =
+        exportSheets.find((s) => s.index === sheet.index) ?? exportSheets[sheet.index]
+      if (!target) throw new Error('Folha não encontrada após reempacotar para export.')
+      const filename = buildSheetFilename(target, exportSheets.length, clientName)
+      await downloadSheetPng(target, effectiveDpi, filename, exportOpts)
       setStatus(`Folha ${sheet.index + 1} exportada (~${effectiveDpi} DPI).`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar PNG.')
@@ -401,21 +581,25 @@ export default function App() {
   const handleExportAll = async () => {
     if (sheets.length === 0) return
     setExporting(true)
-    setStatus(`Exportando ${sheets.length} folha(s) em ~${effectiveDpi} DPI…`)
+    setStatus(`Exportando em ~${effectiveDpi} DPI (reempacotando na qualidade nativa)…`)
     try {
-      if (sheets.length === 1) {
-        const filename = buildSheetFilename(sheets[0], 1, clientName)
-        await downloadSheetPng(sheets[0], effectiveDpi, filename, exportOpts)
+      const exportSheets = packForExport()
+      if (exportSheets.length === 0) {
+        throw new Error('Nenhuma folha para exportar.')
+      }
+      if (exportSheets.length === 1) {
+        const filename = buildSheetFilename(exportSheets[0], 1, clientName)
+        await downloadSheetPng(exportSheets[0], effectiveDpi, filename, exportOpts)
       } else {
         await downloadAllSheetsZip(
-          sheets,
+          exportSheets,
           effectiveDpi,
           buildZipFilename(clientName),
           exportOpts,
           clientName,
         )
       }
-      setStatus(`Exportação concluída (~${effectiveDpi} DPI).`)
+      setStatus(`Exportação concluída (~${effectiveDpi} DPI · ${exportSheets.length} folha(s)).`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar.')
     } finally {
@@ -508,7 +692,8 @@ export default function App() {
           </label>
           <p className="hint">
             Exporta na mesma resolução das artes (sem pedir para reduzir qualidade), mesmo em
-            folhas grandes. DPI nativo calculado: ~{nativeDpi}.
+            folhas grandes. DPI nativo calculado: ~{nativeDpi}. A pré-visualização ao vivo usa
+            até {PREVIEW_DPI_CAP} DPI (export reempacota no DPI completo).
           </p>
 
           {!config.useNativeDpi && (
@@ -785,13 +970,26 @@ export default function App() {
               </button>
             )}
           </div>
+          <label className="checkbox" style={{ marginTop: '0.65rem' }}>
+            <input
+              type="checkbox"
+              checked={skipDuplicateNames}
+              onChange={(e) => setSkipDuplicateNames(e.target.checked)}
+            />
+            <span>Ignorar duplicatas (mesmo nome + tamanho)</span>
+          </label>
+          <p className="hint">
+            <strong>Selecionar pasta</strong> só lê os PNGs no navegador — não grava nem copia
+            na pasta. Se aparecerem cópias no Windows, confira o Organizador Nesting ou a pasta
+            de Downloads.
+          </p>
           <input
             ref={fileInputRef}
             type="file"
             accept="image/png,.png"
             multiple
             hidden
-            onChange={(e) => e.target.files && importFiles(e.target.files)}
+            onChange={(e) => e.target.files && void importFiles(e.target.files)}
           />
           <input
             ref={folderInputRef}
@@ -799,7 +997,7 @@ export default function App() {
             accept="image/png,.png"
             multiple
             hidden
-            onChange={(e) => e.target.files && importFiles(e.target.files)}
+            onChange={(e) => e.target.files && void importFiles(e.target.files)}
           />
           {(status || loading) && (
             <p className={statusClass || 'status-banner'}>
@@ -1075,6 +1273,12 @@ export default function App() {
               </div>
             )}
 
+            {packFatalError && (
+              <ul className="errors">
+                <li>{packFatalError}</li>
+              </ul>
+            )}
+
             {packErrors.length > 0 && (
               <ul className="errors">
                 {packErrors.map((e, i) => (
@@ -1086,12 +1290,18 @@ export default function App() {
             {sheets.length === 0 ? (
               <div className="empty-state">
                 <p className="empty-state-title">
-                  {arts.length === 0 ? 'Aguardando artes' : 'Nenhuma folha gerada'}
+                  {arts.length === 0
+                    ? 'Aguardando artes'
+                    : packFatalError
+                      ? 'Falha ao montar'
+                      : 'Nenhuma folha gerada'}
                 </p>
                 <p className="empty-state-desc">
                   {arts.length === 0
                     ? 'Importe artes à esquerda — a pré-visualização aparece aqui ao vivo.'
-                    : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
+                    : packFatalError
+                      ? packFatalError
+                      : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
                 </p>
               </div>
             ) : (
@@ -1122,18 +1332,14 @@ export default function App() {
                       </button>
                     </div>
                     <div className="sheet-preview checker">
-                      {sheet.previewUrl ? (
-                        <img
-                          src={sheet.previewUrl}
-                          alt={
-                            isAutoHeight
-                              ? 'Pré-visualização da tira'
-                              : `Folha ${sheet.index + 1}`
-                          }
-                        />
-                      ) : (
-                        <p className="empty">Preview indisponível (folha muito grande)</p>
-                      )}
+                      <LazySheetPreview
+                        sheet={sheet}
+                        alt={
+                          isAutoHeight
+                            ? 'Pré-visualização da tira'
+                            : `Folha ${sheet.index + 1}`
+                        }
+                      />
                     </div>
                   </div>
                 ))}

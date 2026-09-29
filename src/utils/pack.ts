@@ -86,43 +86,58 @@ interface PackRect {
 export interface PackArtsOptions {
   /** Se true, não renderiza canvas/preview (só posições + contagem de folhas). */
   skipPreview?: boolean
+  /**
+   * Gera previewUrl só para as primeiras N folhas (evita OOM com muitas folhas).
+   * Folhas além disso ficam com previewUrl vazio (lazy / sob demanda na UI).
+   */
+  maxPreviewSheets?: number
 }
 
-function buildPreviewUrl(
+export function buildPreviewUrl(
   sheetW: number,
   sheetH: number,
   placements: PackedPlacement[],
 ): string {
   try {
+    if (sheetW <= 0 || sheetH <= 0) return ''
     const scale = Math.min(1, PREVIEW_MAX_SIDE / sheetW, PREVIEW_MAX_SIDE / sheetH)
-    if (scale < 1) {
-      const pw = Math.max(1, Math.round(sheetW * scale))
-      const ph = Math.max(1, Math.round(sheetH * scale))
-      const scaled = placements.map((p) => ({
-        ...p,
-        x: p.x * scale,
-        y: p.y * scale,
-        width: Math.max(1, p.width * scale),
-        height: Math.max(1, p.height * scale),
-      }))
-      return renderSheetCanvas(pw, ph, scaled).toDataURL('image/png')
-    }
-    return renderSheetCanvas(sheetW, sheetH, placements).toDataURL('image/png')
-  } catch {
-    // Folha enorme / limite do browser — preview vazio; export usa tiles
+    const pw = Math.max(1, Math.round(sheetW * scale))
+    const ph = Math.max(1, Math.round(sheetH * scale))
+    // Nunca toDataURL da folha em resolução nativa — sempre limita PREVIEW_MAX_SIDE
+    const scaled =
+      scale < 1
+        ? placements.map((p) => ({
+            ...p,
+            x: p.x * scale,
+            y: p.y * scale,
+            width: Math.max(1, p.width * scale),
+            height: Math.max(1, p.height * scale),
+          }))
+        : placements
+    const canvas = renderSheetCanvas(pw, ph, scaled)
+    return canvas.toDataURL('image/png')
+  } catch (e) {
+    console.warn('Preview da folha falhou (memória/limite do canvas):', e)
     return ''
   }
+}
+
+interface FinalizeOpts {
+  skipPreview: boolean
+  maxPreviewSheets: number
 }
 
 function finalizeSheet(
   sheetW: number,
   sheetH: number,
   placements: PackedPlacement[],
-  skipPreview: boolean,
+  opts: FinalizeOpts,
   sheets: PackedSheet[],
 ): void {
   if (placements.length === 0) return
-  const previewUrl = skipPreview ? '' : buildPreviewUrl(sheetW, sheetH, placements)
+  const wantPreview =
+    !opts.skipPreview && sheets.length < opts.maxPreviewSheets
+  const previewUrl = wantPreview ? buildPreviewUrl(sheetW, sheetH, placements) : ''
   sheets.push({
     index: sheets.length,
     widthPx: sheetW,
@@ -149,7 +164,7 @@ function packGrade(
   validArts: ArtItem[],
   validSizes: ArtPrintSize[],
   config: SheetConfig,
-  skipPreview: boolean,
+  opts: FinalizeOpts,
 ): PackedSheet[] {
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
   const sheetH = roundPx(cmToPx(config.heightCm, config.dpi))
@@ -267,7 +282,7 @@ function packGrade(
       place(piece)
     }
 
-    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+    finalizeSheet(sheetW, sheetH, placements, opts, sheets)
   }
 
   return sheets
@@ -282,7 +297,7 @@ function packGrouped(
   validSizes: ArtPrintSize[],
   config: SheetConfig,
   mode: 'group_rows' | 'group_cols',
-  skipPreview: boolean,
+  opts: FinalizeOpts,
 ): PackedSheet[] {
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
   const sheetH = roundPx(cmToPx(config.heightCm, config.dpi))
@@ -308,7 +323,7 @@ function packGrouped(
   const gapCrossPx = isRows ? gapYPx : gapXPx
 
   const newSheet = () => {
-    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+    finalizeSheet(sheetW, sheetH, placements, opts, sheets)
     placements = []
     stripPos = 0
     along = 0
@@ -378,7 +393,7 @@ function packGrouped(
     }
   }
 
-  finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+  finalizeSheet(sheetW, sheetH, placements, opts, sheets)
   return sheets
 }
 
@@ -386,7 +401,7 @@ function packMaxRects(
   validArts: ArtItem[],
   validSizes: ArtPrintSize[],
   config: SheetConfig,
-  skipPreview: boolean,
+  opts: FinalizeOpts,
   errors: string[],
 ): PackedSheet[] {
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
@@ -458,7 +473,7 @@ function packMaxRects(
       }
     })
 
-    finalizeSheet(sheetW, sheetH, placements, skipPreview, sheets)
+    finalizeSheet(sheetW, sheetH, placements, opts, sheets)
   }
 
   return sheets
@@ -536,7 +551,7 @@ function shrinkAutoHeightSheet(
   sheet: PackedSheet,
   config: SheetConfig,
   marginPx: number,
-  skipPreview: boolean,
+  opts: FinalizeOpts,
 ): { sheet: PackedSheet; overflow: boolean } {
   const bbox = getPlacementsBBox(sheet.placements)
   if (!bbox) {
@@ -553,9 +568,11 @@ function shrinkAutoHeightSheet(
     : usedHeightPx
 
   const placements = sheet.placements
-  const previewUrl = skipPreview
-    ? ''
-    : buildPreviewUrl(widthPx, heightPx, placements)
+  // Re-gera preview na altura encolhida (só se a 1ª folha pediu preview)
+  const wantPreview = !opts.skipPreview && sheet.index < opts.maxPreviewSheets
+  const previewUrl = wantPreview
+    ? buildPreviewUrl(widthPx, heightPx, placements)
+    : ''
 
   return {
     overflow,
@@ -587,7 +604,13 @@ export function packArts(
   config: SheetConfig,
   options?: PackArtsOptions,
 ): { sheets: PackedSheet[]; errors: string[]; printSizes: ArtPrintSize[] } {
-  const skipPreview = options?.skipPreview === true
+  const opts: FinalizeOpts = {
+    skipPreview: options?.skipPreview === true,
+    maxPreviewSheets:
+      options?.maxPreviewSheets == null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, options.maxPreviewSheets),
+  }
   const grow = config.sheetGrowMode === 'auto_height'
   const packConfig: SheetConfig = grow
     ? { ...config, heightCm: MAX_AUTO_HEIGHT_CM }
@@ -614,11 +637,11 @@ export function packArts(
 
   let sheets: PackedSheet[]
   if (mode === 'grade') {
-    sheets = packGrade(validArts, validSizes, packConfig, skipPreview)
+    sheets = packGrade(validArts, validSizes, packConfig, opts)
   } else if (mode === 'group_rows' || mode === 'group_cols') {
-    sheets = packGrouped(validArts, validSizes, packConfig, mode, skipPreview)
+    sheets = packGrouped(validArts, validSizes, packConfig, mode, opts)
   } else {
-    sheets = packMaxRects(validArts, validSizes, packConfig, skipPreview, errors)
+    sheets = packMaxRects(validArts, validSizes, packConfig, opts, errors)
   }
 
   if (grow) {
@@ -631,10 +654,10 @@ export function packArts(
           `(geraria ${sheets.length} tiras). Reduza quantidades, tamanho das artes ou aumente a largura.`,
       )
       // Ainda assim mostra a 1ª tira encolhida para o usuário ver o progresso
-      const first = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, skipPreview)
+      const first = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, opts)
       return { sheets: [first.sheet], errors, printSizes }
     }
-    const shrunk = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, skipPreview)
+    const shrunk = shrinkAutoHeightSheet(sheets[0], packConfig, marginPx, opts)
     if (shrunk.overflow) {
       errors.push(
         `Folha sob medida: altura usada (${shrunk.sheet.usedHeightCm?.toFixed(1)} cm) ` +
@@ -673,12 +696,25 @@ export function renderSheetCanvas(
   heightPx: number,
   placements: PackedPlacement[],
 ): HTMLCanvasElement {
+  const w = Math.max(1, Math.round(widthPx))
+  const h = Math.max(1, Math.round(heightPx))
   const canvas = document.createElement('canvas')
-  canvas.width = widthPx
-  canvas.height = heightPx
+  try {
+    canvas.width = w
+    canvas.height = h
+  } catch {
+    throw new Error(
+      `Não foi possível criar canvas da folha (${w}×${h} px). Reduza o DPI ou o tamanho.`,
+    )
+  }
+  if (canvas.width !== w || canvas.height !== h) {
+    throw new Error(
+      `Canvas da folha rejeitado (${w}×${h} px). Reduza o DPI ou o tamanho.`,
+    )
+  }
   const ctx = canvas.getContext('2d', { alpha: true })
   if (!ctx) throw new Error('Canvas 2D indisponível')
-  ctx.clearRect(0, 0, widthPx, heightPx)
+  ctx.clearRect(0, 0, w, h)
 
   for (const p of placements) {
     ctx.save()

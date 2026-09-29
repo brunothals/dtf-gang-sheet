@@ -7,6 +7,30 @@
  * fundo branco opaco — só alpha.
  */
 
+/** Aviso se a arte original exceder este lado (px). Mantém canvas completo para export. */
+export const IMPORT_WARN_MAX_SIDE_PX = 8000
+
+/** Lado máximo do thumbnail na lista de artes (não afeta packing/export). */
+export const THUMBNAIL_MAX_SIDE = 160
+
+function createCanvas(w: number, h: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  try {
+    canvas.width = Math.max(1, Math.round(w))
+    canvas.height = Math.max(1, Math.round(h))
+  } catch {
+    throw new Error(
+      `Não foi possível criar canvas ${w}×${h} px (memória ou limite do navegador).`,
+    )
+  }
+  if (canvas.width !== Math.max(1, Math.round(w)) || canvas.height !== Math.max(1, Math.round(h))) {
+    throw new Error(
+      `Canvas ${w}×${h} px rejeitado pelo navegador (dimensão ou memória).`,
+    )
+  }
+  return canvas
+}
+
 export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   const url = URL.createObjectURL(file)
   try {
@@ -24,14 +48,44 @@ export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
 }
 
 function imageToCanvas(source: CanvasImageSource, w: number, h: number): HTMLCanvasElement {
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
+  const canvas = createCanvas(w, h)
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D indisponível')
   ctx.clearRect(0, 0, w, h)
   ctx.drawImage(source, 0, 0)
   return canvas
+}
+
+/**
+ * Gera dataURL pequeno para a lista (nunca toDataURL da arte em resolução plena).
+ */
+export function makeThumbnailDataUrl(
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  maxSide = THUMBNAIL_MAX_SIDE,
+): string {
+  try {
+    const sw = Math.max(1, srcW)
+    const sh = Math.max(1, srcH)
+    const scale = Math.min(1, maxSide / sw, maxSide / sh)
+    const tw = Math.max(1, Math.round(sw * scale))
+    const th = Math.max(1, Math.round(sh * scale))
+    const canvas = createCanvas(tw, th)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    ctx.clearRect(0, 0, tw, th)
+    ctx.imageSmoothingEnabled = true
+    try {
+      ctx.imageSmoothingQuality = 'medium'
+    } catch {
+      /* ok */
+    }
+    ctx.drawImage(source, 0, 0, sw, sh, 0, 0, tw, th)
+    return canvas.toDataURL('image/png')
+  } catch {
+    return ''
+  }
 }
 
 /** Carrega PNG como canvas original (sem corte). */
@@ -40,12 +94,25 @@ export async function loadPngAsCanvas(file: File): Promise<{
   canvas: HTMLCanvasElement
   width: number
   height: number
+  warnLarge?: boolean
 }> {
+  if (!file || file.size === 0) {
+    throw new Error(`Arquivo vazio: ${file?.name ?? '(sem nome)'}`)
+  }
   const img = await loadImageFromFile(file)
   const w = img.naturalWidth
   const h = img.naturalHeight
+  if (w <= 0 || h <= 0) {
+    throw new Error(`PNG sem dimensões válidas: ${file.name}`)
+  }
   const canvas = imageToCanvas(img, w, h)
-  return { name: file.name, canvas, width: w, height: h }
+  return {
+    name: file.name,
+    canvas,
+    width: w,
+    height: h,
+    warnLarge: w > IMPORT_WARN_MAX_SIDE_PX || h > IMPORT_WARN_MAX_SIDE_PX,
+  }
 }
 
 export function trimToAlphaBounds(
@@ -54,9 +121,7 @@ export function trimToAlphaBounds(
   srcH: number,
   alphaThreshold = 8,
 ): { canvas: HTMLCanvasElement; width: number; height: number } {
-  const probe = document.createElement('canvas')
-  probe.width = srcW
-  probe.height = srcH
+  const probe = createCanvas(srcW, srcH)
   const pctx = probe.getContext('2d', { willReadFrequently: true })
   if (!pctx) throw new Error('Canvas 2D indisponível')
   pctx.clearRect(0, 0, srcW, srcH)
@@ -84,17 +149,13 @@ export function trimToAlphaBounds(
 
   // Arte totalmente transparente → canvas 1×1 vazio
   if (maxX < minX || maxY < minY) {
-    const empty = document.createElement('canvas')
-    empty.width = 1
-    empty.height = 1
+    const empty = createCanvas(1, 1)
     return { canvas: empty, width: 1, height: 1 }
   }
 
   const w = maxX - minX + 1
   const h = maxY - minY + 1
-  const out = document.createElement('canvas')
-  out.width = w
-  out.height = h
+  const out = createCanvas(w, h)
   const octx = out.getContext('2d')
   if (!octx) throw new Error('Canvas 2D indisponível')
   octx.clearRect(0, 0, w, h)
