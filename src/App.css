@@ -479,13 +479,13 @@ textarea {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 0.55rem 0.6rem;
+  padding: 0.45rem 0.45rem;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 
 .art-table td {
-  padding: 0.55rem 0.6rem;
+  padding: 0.45rem 0.45rem;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -496,26 +496,16 @@ textarea {
 
 .art-table .qty,
 .art-table .override {
-  width: 4.5rem;
+  width: 3.75rem;
 }
 
-.name-cell {
-  max-width: 220px;
-}
-
-.name-cell span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.name-cell .err {
+.px-size .err {
   display: block;
   color: #fca5a5;
   font-size: 0.75rem;
   white-space: normal;
   margin-top: 0.2rem;
+  max-width: 12rem;
 }
 
 .row-error {
@@ -659,7 +649,7 @@ textarea {
 .row-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.25rem;
   justify-content: flex-end;
   white-space: nowrap;
 }

@@ -1057,7 +1057,6 @@ export default function App() {
                       <span className="sr-only">Sel.</span>
                     </th>
                     <th></th>
-                    <th>Nome</th>
                     <th>px (orig. → corte)</th>
                     <th>Qtd</th>
                     <th>Lado maior (cm)</th>
@@ -1086,16 +1085,16 @@ export default function App() {
                           />
                         </td>
                         <td>
-                          <div className={`thumb checker${art.rotate90 ? ' thumb-rotated' : ''}`}>
+                          <div
+                            className={`thumb checker${art.rotate90 ? ' thumb-rotated' : ''}`}
+                            title={art.name}
+                          >
                             <img src={art.thumbnailUrl} alt={art.name} />
                           </div>
                         </td>
-                        <td className="name-cell">
-                          <span title={art.name}>{art.name}</span>
-                          {ps.error && <small className="err">{ps.error}</small>}
-                        </td>
                         <td className="mono px-size" title={pxLabel}>
                           {pxLabel}
+                          {ps.error && <small className="err">{ps.error}</small>}
                         </td>
                         <td>
                           <input
