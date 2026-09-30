@@ -6,8 +6,9 @@ import '../App.css'
 import './Shell.css'
 
 const MockupStudio = lazy(() => import('../mockup/MockupStudio'))
+const Calculadora = lazy(() => import('../calculadora/Calculadora'))
 
-type Tab = 'folha' | 'mockup'
+type Tab = 'folha' | 'calculadora' | 'mockup'
 
 type Props = {
   onLogout: () => void
@@ -39,6 +40,14 @@ export default function Shell({ onLogout }: Props) {
             </button>
             <button
               type="button"
+              className={`shell-seg ${tab === 'calculadora' ? 'active' : ''}`}
+              onClick={() => setTab('calculadora')}
+              aria-pressed={tab === 'calculadora'}
+            >
+              Calculadora
+            </button>
+            <button
+              type="button"
               className={`shell-seg ${tab === 'mockup' ? 'active' : ''}`}
               onClick={() => setTab('mockup')}
               aria-pressed={tab === 'mockup'}
@@ -63,6 +72,16 @@ export default function Shell({ onLogout }: Props) {
       <div className="shell-body">
         {tab === 'folha' ? (
           <App />
+        ) : tab === 'calculadora' ? (
+          <Suspense
+            fallback={
+              <div className="shell-loading">
+                <div className="shell-loading-card">Carregando calculadora…</div>
+              </div>
+            }
+          >
+            <Calculadora />
+          </Suspense>
         ) : (
           <Suspense
             fallback={
