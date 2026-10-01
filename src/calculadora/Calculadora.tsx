@@ -67,7 +67,7 @@ export default function Calculadora() {
   const [clientName, setClientName] = useState('')
   const [saleAd, setSaleAd] = useState('')
   const [mainMode, setMainMode] = useState<MainMode>('normal')
-  const [normalSub, setNormalSub] = useState<NormalSub>('fill')
+  const [normalSub, setNormalSub] = useState<NormalSub>('multi')
 
   const [folhaSel, setFolhaSel] = useState('29x42')
   const [fhCustom, setFhCustom] = useState(60)
@@ -478,130 +478,76 @@ export default function Calculadora() {
 
   return (
     <div className="calc-studio">
-      <header className="page-header calc-header">
-        <p className="section-kicker">Orçamento</p>
-        <h1>Calculadora DTF UV</h1>
-        <p className="subtitle">
-          Informe medidas, cores e quantidades. Calcule o encaixe em folhas 29 cm e copie um
-          orçamento formal para o cliente.
+      <header className="calc-header">
+        <div>
+          <p className="section-kicker">Orçamento</p>
+          <h1>Calculadora DTF UV</h1>
+        </div>
+        <p className="calc-header-sub">
+          Medidas → encaixe 29 cm → orçamento. Sem scroll longo até as artes.
         </p>
       </header>
 
       <div className="calc-layout">
-        <div className="calc-sidebar">
-          <section className="card">
-            <div className="card-header">
-              <div>
-                <p className="section-kicker">Pedido</p>
-                <h2>Dados do cliente</h2>
-                <p className="card-desc">Nome e referência aparecem no orçamento</p>
-              </div>
-            </div>
-            <div className="grid-2">
-              <label className="field">
-                <span>Nome do cliente</span>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="ex: Maria Silva"
-                />
-              </label>
-              <label className="field">
-                <span>Anúncio da venda</span>
-                <input
-                  type="text"
-                  value={saleAd}
-                  onChange={(e) => setSaleAd(e.target.value)}
-                  placeholder="ex: Instagram — copos"
-                />
-              </label>
-            </div>
-
-            {saved.length > 0 && (
-              <div className="calc-saved">
-                <p className="calc-saved-title">Pedidos salvos neste navegador</p>
-                <ul className="calc-saved-list">
-                  {saved.slice(0, 8).map((o) => (
-                    <li key={o.id} className="calc-saved-item">
-                      <div>
-                        <strong>{o.client}</strong>
-                        <span className="hint">
-                          {o.ad} · {o.sheet} · {o.placed}/{o.requested} ·{' '}
-                          {new Date(o.createdAt).toLocaleString('pt-BR')}
-                        </span>
-                      </div>
-                      <div className="calc-saved-actions">
-                        <button type="button" className="btn ghost sm" onClick={() => onAbrirSalvo(o.id)}>
-                          Abrir
-                        </button>
-                        <button type="button" className="btn ghost sm" onClick={() => onCopiarSalvo(o.id)}>
-                          Copiar
-                        </button>
-                        <button type="button" className="btn ghost sm" onClick={() => onExcluirSalvo(o.id)}>
-                          Excluir
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {savedDetail && (
-                  <label className="field" style={{ marginTop: '0.75rem' }}>
-                    <span>Pedido aberto</span>
-                    <textarea className="calc-textarea" value={savedDetail} readOnly rows={6} />
-                  </label>
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="card">
-            <div className="card-header">
-              <div>
-                <p className="section-kicker">Modo</p>
-                <h2>Tipo de cálculo</h2>
-              </div>
-            </div>
+        {/* LEFT: form — sticky / scrollable */}
+        <aside className="calc-sidebar">
+          <div className="calc-panel">
+            {/* Mode */}
             <div className="calc-tabs" role="tablist">
               <button
                 type="button"
                 className={`calc-tab ${mainMode === 'normal' ? 'on' : ''}`}
                 onClick={() => setMainMode('normal')}
               >
-                Tenho a folha — quantas artes cabem?
+                Tenho a folha
               </button>
               <button
                 type="button"
                 className={`calc-tab ${mainMode === 'inv' ? 'on' : ''}`}
                 onClick={() => setMainMode('inv')}
               >
-                Tenho as artes — qual folha usar?
+                Qual folha usar?
               </button>
             </div>
-          </section>
 
-          {mainMode === 'normal' && (
-            <>
-              <section className="card">
-                <div className="card-header">
-                  <div>
-                    <p className="section-kicker">Folha</p>
-                    <h2>Configuração</h2>
-                  </div>
-                </div>
-                <div className="grid-2">
+            {/* Cliente — compact */}
+            <div className="calc-meta">
+              <label className="field">
+                <span>Cliente</span>
+                <input
+                  type="text"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  placeholder="Maria Silva"
+                />
+              </label>
+              <label className="field">
+                <span>Anúncio</span>
+                <input
+                  type="text"
+                  value={saleAd}
+                  onChange={(e) => setSaleAd(e.target.value)}
+                  placeholder="Instagram — copos"
+                />
+              </label>
+            </div>
+
+            {mainMode === 'normal' && (
+              <>
+                {/* Folha config — one dense row */}
+                <div className="calc-folha-row">
                   <label className="field">
-                    <span>Tamanho da folha</span>
+                    <span>Folha</span>
                     <select value={folhaSel} onChange={(e) => setFolhaSel(e.target.value)}>
-                      <option value="29x21">29 × 21 cm</option>
-                      <option value="29x42">29 × 42 cm</option>
-                      <option value="29x50">29 × 50 cm</option>
-                      <option value="29x100">29 × 100 cm</option>
-                      <option value="custom">Personalizado</option>
+                      <option value="29x21">29×21</option>
+                      <option value="29x42">29×42</option>
+                      <option value="29x50">29×50</option>
+                      <option value="29x100">29×100</option>
+                      <option value="custom">Custom</option>
                     </select>
                   </label>
                   <label className="field">
-                    <span>Espaçamento (cm)</span>
+                    <span>Esp. cm</span>
                     <input
                       type="number"
                       value={esp}
@@ -612,7 +558,7 @@ export default function Calculadora() {
                     />
                   </label>
                   <label className="field">
-                    <span>Comprimento custom (cm)</span>
+                    <span>Custom H</span>
                     <input
                       type="number"
                       value={fhCustom}
@@ -621,24 +567,16 @@ export default function Calculadora() {
                       onChange={(e) => setFhCustom(Number(e.target.value))}
                     />
                   </label>
+                  <label className="calc-check">
+                    <input
+                      type="checkbox"
+                      checked={useRot}
+                      onChange={(e) => setUseRot(e.target.checked)}
+                    />
+                    Rot. 90°
+                  </label>
                 </div>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={useRot}
-                    onChange={(e) => setUseRot(e.target.checked)}
-                  />
-                  Rotação automática — testa 90° para encaixar mais
-                </label>
-              </section>
 
-              <section className="card">
-                <div className="card-header">
-                  <div>
-                    <p className="section-kicker">Artes</p>
-                    <h2>Arte principal</h2>
-                  </div>
-                </div>
                 <div className="calc-subtabs">
                   <button
                     type="button"
@@ -657,54 +595,48 @@ export default function Calculadora() {
                 </div>
 
                 {normalSub === 'fill' ? (
-                  <>
-                    <p className="hint">
-                      Informe a medida — a calculadora preenche a folha automaticamente.
-                    </p>
-                    <div className="grid-2">
-                      <label className="field">
-                        <span>Nome (opcional)</span>
-                        <input
-                          type="text"
-                          value={fillName}
-                          onChange={(e) => setFillName(e.target.value)}
-                          placeholder="ex: Logo copo"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Cor da arte</span>
-                        <input
-                          type="text"
-                          value={fillColor}
-                          onChange={(e) => setFillColor(e.target.value)}
-                          placeholder="ex: preto, branco"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Largura (cm)</span>
-                        <input
-                          type="number"
-                          value={fillW}
-                          min={0.1}
-                          step={0.1}
-                          onChange={(e) => setFillW(Number(e.target.value))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Altura (cm)</span>
-                        <input
-                          type="number"
-                          value={fillH}
-                          min={0.1}
-                          step={0.1}
-                          onChange={(e) => setFillH(Number(e.target.value))}
-                        />
-                      </label>
-                    </div>
-                  </>
+                  <div className="calc-fill-row">
+                    <label className="field">
+                      <span>L cm</span>
+                      <input
+                        type="number"
+                        value={fillW}
+                        min={0.1}
+                        step={0.1}
+                        onChange={(e) => setFillW(Number(e.target.value))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>A cm</span>
+                      <input
+                        type="number"
+                        value={fillH}
+                        min={0.1}
+                        step={0.1}
+                        onChange={(e) => setFillH(Number(e.target.value))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Cor</span>
+                      <input
+                        type="text"
+                        value={fillColor}
+                        onChange={(e) => setFillColor(e.target.value)}
+                        placeholder="preto"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Nome</span>
+                      <input
+                        type="text"
+                        value={fillName}
+                        onChange={(e) => setFillName(e.target.value)}
+                        placeholder="opcional"
+                      />
+                    </label>
+                  </div>
                 ) : (
                   <>
-                    <p className="hint">Adicione artes com tamanhos, cores e quantidades diferentes.</p>
                     <ArtRows
                       arts={arts}
                       onChange={(id, patch) => updateArt(arts, setArts, id, patch)}
@@ -712,8 +644,7 @@ export default function Calculadora() {
                     />
                     <button
                       type="button"
-                      className="btn ghost sm"
-                      style={{ marginTop: '0.5rem' }}
+                      className="calc-add"
                       onClick={() => setArts([...arts, newArt({ qty: 1, color: '' })])}
                     >
                       + Adicionar arte
@@ -721,150 +652,194 @@ export default function Calculadora() {
                   </>
                 )}
 
-                <div className="calc-s2">
-                  <p className="calc-s2-title">Segunda arte proporcional (opcional)</p>
-                  <p className="hint">
-                    Para aproveitar o espaço restante. Mesma proporção da arte principal.
-                  </p>
-                  <div className="grid-2">
+                <details className="calc-details">
+                  <summary>2ª arte (espaço restante, opcional)</summary>
+                  <div className="calc-fill-row" style={{ marginTop: '0.45rem' }}>
                     <label className="field">
-                      <span>Largura 2ª (cm)</span>
+                      <span>L cm</span>
                       <input
                         type="number"
                         value={s2w}
                         min={0.1}
                         step={0.1}
-                        placeholder="ex: 5"
+                        placeholder="5"
                         onChange={(e) =>
                           setS2w(e.target.value === '' ? '' : Number(e.target.value))
                         }
                       />
                     </label>
                     <label className="field">
-                      <span>Altura 2ª (cm)</span>
+                      <span>A cm</span>
                       <input
                         type="number"
                         value={s2h}
                         min={0.1}
                         step={0.1}
-                        placeholder="ex: 4"
+                        placeholder="4"
                         onChange={(e) =>
                           setS2h(e.target.value === '' ? '' : Number(e.target.value))
                         }
                       />
                     </label>
                     <label className="field">
-                      <span>Cor 2ª arte</span>
+                      <span>Cor</span>
                       <input
                         type="text"
                         value={s2Color}
-                        placeholder="ex: preto"
+                        placeholder="preto"
                         onChange={(e) => setS2Color(e.target.value)}
                       />
                     </label>
                   </div>
-                </div>
-              </section>
-            </>
-          )}
+                </details>
+              </>
+            )}
 
-          {mainMode === 'inv' && (
-            <section className="card">
-              <div className="card-header">
-                <div>
-                  <p className="section-kicker">Artes</p>
-                  <h2>Artes do pedido</h2>
-                  <p className="card-desc">
-                    Encontra o menor comprimento real com largura fixa 29 cm
-                  </p>
+            {mainMode === 'inv' && (
+              <>
+                <p className="calc-hint-inline">
+                  Menor comprimento com largura fixa 29 cm
+                </p>
+                <ArtRows
+                  arts={artsInv}
+                  onChange={(id, patch) => updateArt(artsInv, setArtsInv, id, patch)}
+                  onRemove={(id) => setArtsInv(artsInv.filter((a) => a.id !== id))}
+                />
+                <button
+                  type="button"
+                  className="calc-add"
+                  onClick={() => setArtsInv([...artsInv, newArt({ qty: 1, color: '' })])}
+                >
+                  + Adicionar arte
+                </button>
+                <div className="calc-folha-row">
+                  <label className="field">
+                    <span>Esp. cm</span>
+                    <input
+                      type="number"
+                      value={espInv}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      onChange={(e) => setEspInv(Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="calc-check">
+                    <input
+                      type="checkbox"
+                      checked={useRotInv}
+                      onChange={(e) => setUseRotInv(e.target.checked)}
+                    />
+                    Rot. 90°
+                  </label>
                 </div>
-              </div>
-              <ArtRows
-                arts={artsInv}
-                onChange={(id, patch) => updateArt(artsInv, setArtsInv, id, patch)}
-                onRemove={(id) => setArtsInv(artsInv.filter((a) => a.id !== id))}
-              />
+              </>
+            )}
+
+            {/* Primary actions — right under arts */}
+            <div className="calc-actions">
+              <button type="button" className="btn primary" onClick={calcular}>
+                {mainMode === 'normal' ? 'Calcular encaixe' : 'Calcular folha ideal'}
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={onCopyOrcamento}
+                disabled={!result}
+                title={!result ? 'Calcule antes de copiar' : undefined}
+              >
+                Copiar orçamento
+              </button>
+              <button type="button" className="btn ghost" onClick={limpar}>
+                Limpar
+              </button>
+            </div>
+            {error && <p className="calc-error">{error}</p>}
+
+            <div className="calc-secondary-actions">
               <button
                 type="button"
                 className="btn ghost sm"
-                style={{ marginTop: '0.5rem' }}
-                onClick={() => setArtsInv([...artsInv, newArt({ qty: 1, color: '' })])}
+                onClick={onCopyResumo}
+                disabled={!result}
               >
-                + Adicionar arte
+                Copiar resumo
               </button>
-              <div className="grid-2" style={{ marginTop: '0.85rem' }}>
-                <label className="field">
-                  <span>Espaçamento (cm)</span>
-                  <input
-                    type="number"
-                    value={espInv}
-                    min={0}
-                    max={5}
-                    step={0.1}
-                    onChange={(e) => setEspInv(Number(e.target.value))}
-                  />
-                </label>
-                <label className="checkbox" style={{ alignSelf: 'end', marginBottom: '0.35rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={useRotInv}
-                    onChange={(e) => setUseRotInv(e.target.checked)}
-                  />
-                  Rotação automática
-                </label>
-              </div>
-            </section>
-          )}
+              <button
+                type="button"
+                className="btn ghost sm"
+                onClick={onSalvar}
+                disabled={!result}
+              >
+                Salvar pedido
+              </button>
+            </div>
 
-          <div className="calc-actions">
-            <button type="button" className="btn primary" onClick={calcular}>
-              {mainMode === 'normal' ? 'Calcular encaixe' : 'Calcular folha ideal'}
-            </button>
-            <button type="button" className="btn ghost" onClick={limpar}>
-              Limpar
-            </button>
+            <details className="calc-details">
+              <summary>
+                Pedidos salvos{saved.length ? ` (${saved.length})` : ''}
+              </summary>
+              {saved.length === 0 ? (
+                <p className="calc-hint-inline">Nenhum pedido salvo neste navegador.</p>
+              ) : (
+                <ul className="calc-saved-list">
+                  {saved.slice(0, 8).map((o) => (
+                    <li key={o.id} className="calc-saved-item">
+                      <div>
+                        <strong>{o.client}</strong>
+                        <span className="hint">
+                          {o.sheet} · {o.placed}/{o.requested} ·{' '}
+                          {new Date(o.createdAt).toLocaleString('pt-BR')}
+                        </span>
+                      </div>
+                      <div className="calc-saved-actions">
+                        <button type="button" className="btn ghost sm" onClick={() => onAbrirSalvo(o.id)}>
+                          Abrir
+                        </button>
+                        <button type="button" className="btn ghost sm" onClick={() => onCopiarSalvo(o.id)}>
+                          Copiar
+                        </button>
+                        <button type="button" className="btn ghost sm" onClick={() => onExcluirSalvo(o.id)}>
+                          Excluir
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {savedDetail && (
+                <textarea className="calc-textarea" value={savedDetail} readOnly rows={4} />
+              )}
+            </details>
           </div>
-          {error && <p className="calc-error">{error}</p>}
-        </div>
+        </aside>
 
+        {/* RIGHT: results */}
         <div className="calc-results">
           {!result ? (
-            <section className="card calc-empty">
+            <section className="calc-panel calc-empty">
               <p className="section-kicker">Resultado</p>
               <h2>Aguardando cálculo</h2>
-              <p className="card-desc">
-                Configure as artes à esquerda e clique em calcular para ver o layout, o
-                aproveitamento e o orçamento.
+              <p className="calc-hint-inline">
+                Preencha L × A e quantidade à esquerda e clique em Calcular. O layout e o
+                orçamento aparecem aqui.
               </p>
             </section>
           ) : (
-            <>
+            <div className="calc-results-sticky">
               {result.mode === 'inv' && (
-                <section className="card calc-ideal">
-                  <p className="section-kicker">Tamanho mínimo real</p>
-                  <p className="calc-ideal-val">
+                <div className="calc-ideal">
+                  <span className="section-kicker">Mínimo real</span>
+                  <strong className="calc-ideal-val">
                     29 × {fmtCm(result.folha.h)} cm
-                  </p>
-                  <p className="hint">
-                    {result.arts
-                      .map(
-                        (a) =>
-                          `${a.qty}× ${fmtCm(a.origW)}×${fmtCm(a.origH)} cm ${a.color}`,
-                      )
-                      .join(' + ')}
-                    <br />
-                    Aproveitamento: {result.aprov}%
-                    {result.rotCount > 0
-                      ? ` · ${result.rotCount} artes rotacionadas`
-                      : ' · sem rotação'}
-                  </p>
-                </section>
+                  </strong>
+                </div>
               )}
 
               <div className="calc-summary">
                 <div className="calc-sumitem">
                   <span className="calc-sumlabel">Pedido</span>
-                  <strong>{result.requested} artes</strong>
+                  <strong>{result.requested}</strong>
                 </div>
                 <div className="calc-sumitem">
                   <span className="calc-sumlabel">Couberam</span>
@@ -877,23 +852,23 @@ export default function Calculadora() {
                 <div className="calc-sumitem">
                   <span className="calc-sumlabel">Folhas</span>
                   <strong>
-                    {result.sheets.length}× {fmtCm(result.folha.w)}×{fmtCm(result.folha.h)}
+                    {result.sheets.length}×{fmtCm(result.folha.w)}×{fmtCm(result.folha.h)}
                   </strong>
                 </div>
               </div>
 
               <div className="calc-stats">
                 <div className="calc-stat">
-                  <span className="calc-slabel">Aproveitamento</span>
+                  <span className="calc-slabel">Aprov.</span>
                   <strong>{result.aprov}%</strong>
                 </div>
                 <div className="calc-stat">
-                  <span className="calc-slabel">Rotacionadas</span>
+                  <span className="calc-slabel">Rot.</span>
                   <strong>{result.rotCount}</strong>
                 </div>
                 <div className="calc-stat">
-                  <span className="calc-slabel">Espaçamento</span>
-                  <strong>{fmtCm(result.esp)} cm</strong>
+                  <span className="calc-slabel">Esp.</span>
+                  <strong>{fmtCm(result.esp)}</strong>
                 </div>
                 <div className="calc-stat">
                   <span className="calc-slabel">Folha</span>
@@ -903,25 +878,18 @@ export default function Calculadora() {
                 </div>
               </div>
 
-              <section className="card">
-                <div className="card-header calc-result-head">
-                  <div>
-                    <p className="section-kicker">Layout</p>
-                    <h2>Encaixe na folha</h2>
-                  </div>
+              <div className="calc-panel">
+                <div className="calc-result-head">
+                  <span className="calc-fbadge">
+                    {fmtCm(result.folha.w)} × {fmtCm(result.folha.h)} cm
+                    {result.sheets.length > 1 ? ` · ${result.sheets.length} folhas` : ''}
+                  </span>
                   <div className="calc-result-actions">
-                    <span className="calc-fbadge">
-                      {fmtCm(result.folha.w)} × {fmtCm(result.folha.h)} cm
-                      {result.sheets.length > 1 ? ` · ${result.sheets.length} folhas` : ''}
-                    </span>
                     <button type="button" className="btn primary sm" onClick={onCopyOrcamento}>
-                      Copiar orçamento completo
+                      Copiar orçamento
                     </button>
                     <button type="button" className="btn ghost sm" onClick={onCopyResumo}>
-                      Copiar resumo
-                    </button>
-                    <button type="button" className="btn ghost sm" onClick={onSalvar}>
-                      Salvar pedido
+                      Resumo
                     </button>
                   </div>
                 </div>
@@ -957,49 +925,35 @@ export default function Calculadora() {
                     }
                   />
                 )}
-              </section>
+              </div>
 
               {s2Preview && result.mode === 'normal' && (
-                <section className="card">
-                  <div className="card-header">
-                    <div>
-                      <p className="section-kicker">2ª arte</p>
-                      <h2>Espaço restante</h2>
-                    </div>
+                <div className="calc-stats">
+                  <div className="calc-stat">
+                    <span className="calc-slabel">2ª arte</span>
+                    <strong className="ok">{s2Preview.s2Count}</strong>
                   </div>
-                  <div className="calc-stats">
-                    <div className="calc-stat">
-                      <span className="calc-slabel">2ª arte encaixadas</span>
-                      <strong className="ok">{s2Preview.s2Count}</strong>
-                    </div>
-                    <div className="calc-stat">
-                      <span className="calc-slabel">Aprov. total</span>
-                      <strong>{s2Preview.aprov}%</strong>
-                    </div>
-                    <div className="calc-stat">
-                      <span className="calc-slabel">Ganho</span>
-                      <strong>+{s2Preview.aprov - result.aprov}%</strong>
-                    </div>
-                    <div className="calc-stat">
-                      <span className="calc-slabel">Total folha</span>
-                      <strong>{s2Preview.placed.length}</strong>
-                    </div>
+                  <div className="calc-stat">
+                    <span className="calc-slabel">Aprov. total</span>
+                    <strong>{s2Preview.aprov}%</strong>
                   </div>
-                </section>
+                  <div className="calc-stat">
+                    <span className="calc-slabel">Ganho</span>
+                    <strong>+{s2Preview.aprov - result.aprov}%</strong>
+                  </div>
+                  <div className="calc-stat">
+                    <span className="calc-slabel">Total</span>
+                    <strong>{s2Preview.placed.length}</strong>
+                  </div>
+                </div>
               )}
 
               {compRows.length > 0 && (
-                <section className="card calc-comp-card">
-                  <div className="card-header">
-                    <div>
-                      <p className="section-kicker">Comparativo</p>
-                      <h2>
-                        {result.mode === 'inv'
-                          ? 'Folhas padrão'
-                          : 'Folhas padrão (1ª arte)'}
-                      </h2>
-                    </div>
-                  </div>
+                <details className="calc-details calc-comp-details">
+                  <summary>
+                    Comparativo folhas padrão
+                    {result.mode === 'normal' ? ' (1ª arte)' : ''}
+                  </summary>
                   <div className="calc-table-wrap">
                     <table className="calc-table">
                       <thead>
@@ -1016,9 +970,9 @@ export default function Calculadora() {
                             <th>Folha</th>
                             <th>Custo</th>
                             <th>Artes</th>
-                            <th>Col × Lin</th>
-                            <th>Aproveit.</th>
-                            <th>Rotação</th>
+                            <th>Col×Lin</th>
+                            <th>Aprov.</th>
+                            <th>Rot.</th>
                           </tr>
                         )}
                       </thead>
@@ -1029,10 +983,10 @@ export default function Calculadora() {
                               <td>{r.label}</td>
                               <td>{r.cost}</td>
                               <td className={r.ok ? 'ok' : 'warn'}>
-                                {r.ok ? 'Comporta tudo' : 'Não comporta'}
+                                {r.ok ? 'Comporta' : 'Não'}
                               </td>
                               <td>
-                                {r.total} / {result.requested}
+                                {r.total}/{result.requested}
                               </td>
                               <td>{r.sobra}</td>
                             </tr>
@@ -1045,7 +999,7 @@ export default function Calculadora() {
                               <td>{r.cost}</td>
                               <td>{r.total}</td>
                               <td>
-                                {r.cols} × {r.rows}
+                                {r.cols}×{r.rows}
                               </td>
                               <td>{r.aprov}%</td>
                               <td>{r.rotated ? 'sim' : 'não'}</td>
@@ -1055,9 +1009,9 @@ export default function Calculadora() {
                       </tbody>
                     </table>
                   </div>
-                </section>
+                </details>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -1078,62 +1032,66 @@ function ArtRows({
 }) {
   return (
     <div className="calc-arts">
+      <div className="calc-art-head" aria-hidden>
+        <span>Nome</span>
+        <span>L</span>
+        <span>A</span>
+        <span>Qtd</span>
+        <span>Cor</span>
+        <span />
+      </div>
       {arts.map((a, i) => (
         <div key={a.id} className="calc-art-row">
-          <label className="field">
-            <span>Nome</span>
-            <input
-              type="text"
-              value={a.name}
-              placeholder={`Arte ${i + 1}`}
-              onChange={(e) => onChange(a.id, { name: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Largura</span>
-            <input
-              type="number"
-              value={a.origW}
-              min={0.1}
-              step={0.1}
-              onChange={(e) => onChange(a.id, { origW: Number(e.target.value) })}
-            />
-          </label>
-          <label className="field">
-            <span>Altura</span>
-            <input
-              type="number"
-              value={a.origH}
-              min={0.1}
-              step={0.1}
-              onChange={(e) => onChange(a.id, { origH: Number(e.target.value) })}
-            />
-          </label>
-          <label className="field">
-            <span>Qtd</span>
-            <input
-              type="number"
-              value={a.qty}
-              min={1}
-              step={1}
-              onChange={(e) => onChange(a.id, { qty: Number(e.target.value) })}
-            />
-          </label>
-          <label className="field">
-            <span>Cor</span>
-            <input
-              type="text"
-              value={a.color}
-              placeholder="ex: preto"
-              onChange={(e) => onChange(a.id, { color: e.target.value })}
-            />
-          </label>
+          <input
+            type="text"
+            className="calc-art-input"
+            value={a.name}
+            placeholder={`Arte ${i + 1}`}
+            onChange={(e) => onChange(a.id, { name: e.target.value })}
+            aria-label={`Nome arte ${i + 1}`}
+          />
+          <input
+            type="number"
+            className="calc-art-input"
+            value={a.origW}
+            min={0.1}
+            step={0.1}
+            onChange={(e) => onChange(a.id, { origW: Number(e.target.value) })}
+            aria-label={`Largura arte ${i + 1}`}
+          />
+          <input
+            type="number"
+            className="calc-art-input"
+            value={a.origH}
+            min={0.1}
+            step={0.1}
+            onChange={(e) => onChange(a.id, { origH: Number(e.target.value) })}
+            aria-label={`Altura arte ${i + 1}`}
+          />
+          <input
+            type="number"
+            className="calc-art-input"
+            value={a.qty}
+            min={1}
+            step={1}
+            onChange={(e) => onChange(a.id, { qty: Number(e.target.value) })}
+            aria-label={`Quantidade arte ${i + 1}`}
+          />
+          <input
+            type="text"
+            className="calc-art-input"
+            value={a.color}
+            placeholder="preto"
+            onChange={(e) => onChange(a.id, { color: e.target.value })}
+            aria-label={`Cor arte ${i + 1}`}
+          />
           <button
             type="button"
-            className="btn ghost sm calc-rm"
+            className="calc-rm"
             onClick={() => onRemove(a.id)}
             disabled={arts.length <= 1}
             title="Remover"
+            aria-label={`Remover arte ${i + 1}`}
           >
             ×
           </button>
