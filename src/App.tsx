@@ -6,6 +6,7 @@ import {
   SHEET_PRESETS,
   type ArtItem,
   type PackedSheet,
+  type PackMode,
   type SheetConfig,
 } from './types'
 import {
@@ -72,10 +73,6 @@ function buildArtItem(
 
 function artDupKey(name: string, size: number): string {
   return `${name.toLowerCase()}::${size}`
-}
-
-function formatPxSize(w: number, h: number): string {
-  return `${w}×${h}`
 }
 
 function LazySheetPreview({
@@ -630,31 +627,160 @@ export default function App() {
         : ''
 
   return (
-    <div className="app">
-      <header className="page-header">
-        <p className="section-kicker">Folha · Gang Sheet</p>
-        <h1>Montagem de folhas</h1>
-        <p className="subtitle">
-          Empacote artes PNG localmente para DTF UV e anúncios no Mercado Livre. Tudo roda no
-          navegador — nada é enviado ao servidor.
-        </p>
+    <div className="app folha-app">
+      <header className="folha-page-header">
+        <div>
+          <p className="section-kicker">Folha · Gang Sheet</p>
+          <h1>Montagem de folhas</h1>
+        </div>
       </header>
 
-      <main className="folha-layout">
-        <div className="folha-sidebar">
-        {/* Configuração da folha */}
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <p className="section-kicker">Configuração</p>
-              <h2 className="card-title">Folha de impressão</h2>
-              <p className="card-desc">Tamanho, margens, gaps e modo de montagem</p>
-            </div>
-          </div>
+      {/* Barra superior — ações frequentes */}
+      <div className="folha-toolbar">
+        <label className="folha-tb-field">
+          <span>Cliente</span>
+          <input
+            type="text"
+            value={clientName}
+            placeholder="Nome (opcional)"
+            onChange={(e) => setClientName(e.target.value)}
+            maxLength={80}
+          />
+        </label>
 
-          <div className="grid-2">
+        <div className="folha-tb-group">
+          <button
+            type="button"
+            className="btn primary sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+          >
+            Importar PNGs
+          </button>
+          <button
+            type="button"
+            className="btn secondary sm"
+            onClick={() => folderInputRef.current?.click()}
+            disabled={loading}
+          >
+            Pasta
+          </button>
+          {arts.length > 0 && (
+            <button type="button" className="btn danger sm" onClick={clearArts}>
+              Limpar
+            </button>
+          )}
+        </div>
+
+        <label className="folha-tb-check" title="Cortar bordas transparentes">
+          <input
+            type="checkbox"
+            checked={config.trimEnabled}
+            onChange={(e) => updateConfig('trimEnabled', e.target.checked)}
+          />
+          Corte
+        </label>
+
+        <label className="folha-tb-check" title="Recortar espaços vazios no export">
+          <input
+            type="checkbox"
+            checked={config.cropEmptyExport}
+            onChange={(e) => updateConfig('cropEmptyExport', e.target.checked)}
+          />
+          Recorte export
+        </label>
+
+        <select
+          className="folha-tb-select"
+          value={config.packMode}
+          onChange={(e) =>
+            updateConfig('packMode', e.target.value as PackMode)
+          }
+          title="Modo de montagem"
+          aria-label="Modo de montagem"
+        >
+          <option value="maxrects">Aproveitar espaço</option>
+          <option value="grade">Grade</option>
+          <option value="group_rows">Agrupar fileiras</option>
+          <option value="group_cols">Agrupar colunas</option>
+        </select>
+
+        <select
+          className="folha-tb-select"
+          value={isAutoHeight ? 'auto_height' : 'fixed'}
+          onChange={(e) =>
+            setGrowMode(e.target.value === 'auto_height' ? 'auto_height' : 'fixed')
+          }
+          title="Tipo de folha"
+          aria-label="Tipo de folha"
+        >
+          <option value="fixed">Folha fixa</option>
+          <option value="auto_height">Sob medida / rolo</option>
+        </select>
+
+        <span className="folha-tb-dpi" title="DPI de exportação">
+          {config.useNativeDpi
+            ? `~${effectiveDpi} DPI`
+            : `${effectiveDpi} DPI`}
+        </span>
+
+        <div className="folha-tb-group folha-tb-export">
+          <button
+            type="button"
+            className="btn secondary sm"
+            disabled={arts.length === 0}
+            onClick={handlePreencherSobras}
+            title="Adiciona cópias extras só no espaço vazio"
+          >
+            Preencher sobras
+          </button>
+          {sheets.length > 0 && (
+            <button
+              type="button"
+              className="btn primary sm"
+              disabled={exporting}
+              onClick={handleExportAll}
+            >
+              {sheets.length === 1 ? 'Baixar PNG' : 'Baixar ZIP'}
+            </button>
+          )}
+        </div>
+
+        {(status || loading || exporting) && (
+          <p className={`folha-tb-status ${statusClass || ''}`}>
+            {loading && !status ? 'Aguarde…' : status}
+          </p>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,.png"
+          multiple
+          hidden
+          onChange={(e) => e.target.files && void importFiles(e.target.files)}
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          accept="image/png,.png"
+          multiple
+          hidden
+          onChange={(e) => e.target.files && void importFiles(e.target.files)}
+        />
+      </div>
+
+      <main className="folha-layout">
+        {/* ESQUERDA — opções da folha */}
+        <aside className="folha-options">
+          <section className="card folha-card">
+            <div className="folha-card-head">
+              <p className="section-kicker">Opções</p>
+              <h2>Folha</h2>
+            </div>
+
             <label className="field">
-              <span>Preset da folha</span>
+              <span>Preset</span>
               <select value={presetId} onChange={(e) => onPresetChange(e.target.value)}>
                 {(['Mercado Livre', 'Rolo DTF', 'Papel', 'Outro'] as const).map((group) => {
                   const items = SHEET_PRESETS.filter((p) => (p.group ?? 'Outro') === group)
@@ -672,243 +798,150 @@ export default function App() {
               </select>
             </label>
 
-            <div className="field">
-              <span>Exportação</span>
-              <div className="dpi-readout" title="A folha é montada e exportada na densidade das PNGs importadas — sem reduzir qualidade">
-                {config.useNativeDpi
-                  ? `~${effectiveDpi} DPI (nativo das artes)`
-                  : `${effectiveDpi} DPI (forçado)`}
-              </div>
-            </div>
-          </div>
-
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={config.useNativeDpi}
-              onChange={(e) => updateConfig('useNativeDpi', e.target.checked)}
-            />
-            <span>Qualidade do PNG importado (recomendado)</span>
-          </label>
-          <p className="hint">
-            Exporta na mesma resolução das artes (sem pedir para reduzir qualidade), mesmo em
-            folhas grandes. DPI nativo calculado: ~{nativeDpi}. A pré-visualização ao vivo usa
-            até {PREVIEW_DPI_CAP} DPI (export reempacota no DPI completo).
-          </p>
-
-          {!config.useNativeDpi && (
-            <label className="field">
-              <span>Forçar DPI (avançado)</span>
-              <input
-                type="number"
-                min={72}
-                max={2400}
-                step={1}
-                value={config.dpi}
-                onChange={(e) => updateConfig('dpi', Number(e.target.value) || 300)}
-              />
-            </label>
-          )}
-
-          <div className="grid-2">
-            <label className="field">
-              <span>Largura (cm)</span>
-              <input
-                type="number"
-                min={1}
-                step={0.1}
-                value={config.widthCm}
-                disabled={presetId !== 'custom'}
-                onChange={(e) => {
-                  setPresetId('custom')
-                  updateConfig('widthCm', Number(e.target.value) || 1)
-                }}
-              />
-            </label>
-            <label className="field">
-              <span>{isAutoHeight ? 'Altura (cm) — sob medida' : 'Altura (cm)'}</span>
-              {isAutoHeight ? (
-                <div className="dpi-readout" title="A altura cresce automaticamente">
-                  Cresce até {MAX_AUTO_HEIGHT_CM} cm
-                </div>
-              ) : (
+            <div className="grid-2">
+              <label className="field">
+                <span>Largura (cm)</span>
                 <input
                   type="number"
                   min={1}
                   step={0.1}
-                  value={config.heightCm}
+                  value={config.widthCm}
                   disabled={presetId !== 'custom'}
                   onChange={(e) => {
                     setPresetId('custom')
-                    updateConfig('heightCm', Number(e.target.value) || 1)
+                    updateConfig('widthCm', Number(e.target.value) || 1)
                   }}
                 />
-              )}
-            </label>
-          </div>
-          <div className="row-actions" style={{ marginTop: '-0.35rem', marginBottom: '0.65rem' }}>
-            <button type="button" className="btn secondary sm" onClick={rotateSheetOrientation}>
-              Girar orientação (inverte L×A)
-            </button>
-          </div>
-          <p className="hint" style={{ marginTop: '-0.35rem' }}>
-            Presets em Largura × Altura (cm). Use &quot;Girar orientação&quot; para trocar paisagem/retrato.
-          </p>
-
-          <fieldset className="pack-mode">
-            <legend>Tipo de folha</legend>
-            <label className="radio">
-              <input
-                type="radio"
-                name="sheetGrowMode"
-                checked={!isAutoHeight}
-                onChange={() => setGrowMode('fixed')}
-              />
-              <span>Folha fixa (W × H · várias folhas)</span>
-            </label>
-            <label className="radio">
-              <input
-                type="radio"
-                name="sheetGrowMode"
-                checked={isAutoHeight}
-                onChange={() => setGrowMode('auto_height')}
-              />
-              <span>Folha sob medida / rolo (largura fixa · altura cresce)</span>
-            </label>
-            <p className="hint">
-              Em <strong>sob medida</strong>, a largura vem do preset; a altura cresce até caber
-              todas as artes em <em>uma</em> tira contínua (máx. {MAX_AUTO_HEIGHT_CM} cm).
-              Recomendado com modo <strong>Grade</strong>.
-            </p>
-          </fieldset>
-
-          <div className="grid-2">
-            <label className="field">
-              <span>Margem (mm)</span>
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={config.marginMm}
-                onChange={(e) => updateConfig('marginMm', Number(e.target.value) || 0)}
-              />
-            </label>
-            {config.packMode === 'maxrects' && (
+              </label>
               <label className="field">
-                <span>Espaçamento / gap (mm)</span>
+                <span>{isAutoHeight ? 'Altura' : 'Altura (cm)'}</span>
+                {isAutoHeight ? (
+                  <div className="dpi-readout">até {MAX_AUTO_HEIGHT_CM} cm</div>
+                ) : (
+                  <input
+                    type="number"
+                    min={1}
+                    step={0.1}
+                    value={config.heightCm}
+                    disabled={presetId !== 'custom'}
+                    onChange={(e) => {
+                      setPresetId('custom')
+                      updateConfig('heightCm', Number(e.target.value) || 1)
+                    }}
+                  />
+                )}
+              </label>
+            </div>
+
+            <button
+              type="button"
+              className="btn secondary sm folha-full-btn"
+              onClick={rotateSheetOrientation}
+            >
+              Girar orientação (L×A)
+            </button>
+
+            <div className="grid-2">
+              <label className="field">
+                <span>Margem (mm)</span>
                 <input
                   type="number"
                   min={0}
                   step={0.5}
-                  value={config.gapMm}
-                  onChange={(e) => updateConfig('gapMm', Number(e.target.value) || 0)}
+                  value={config.marginMm}
+                  onChange={(e) => updateConfig('marginMm', Number(e.target.value) || 0)}
+                />
+              </label>
+              {config.packMode === 'maxrects' ? (
+                <label className="field">
+                  <span>Gap (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={config.gapMm}
+                    onChange={(e) => updateConfig('gapMm', Number(e.target.value) || 0)}
+                  />
+                </label>
+              ) : (
+                <label className="field">
+                  <span>Lado maior (cm)</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={config.maxSideCm}
+                    onChange={(e) => updateConfig('maxSideCm', Number(e.target.value) || 5)}
+                  />
+                </label>
+              )}
+            </div>
+
+            {(config.packMode === 'grade' ||
+              config.packMode === 'group_rows' ||
+              config.packMode === 'group_cols') && (
+              <div className="grid-2">
+                <label className="field">
+                  <span>Gap X (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={config.gapXMm}
+                    onChange={(e) => updateConfig('gapXMm', Number(e.target.value) || 0)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Gap Y (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={config.gapYMm}
+                    onChange={(e) => updateConfig('gapYMm', Number(e.target.value) || 0)}
+                  />
+                </label>
+              </div>
+            )}
+
+            {config.packMode === 'maxrects' && (
+              <label className="field">
+                <span>Lado maior (cm)</span>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={config.maxSideCm}
+                  onChange={(e) => updateConfig('maxSideCm', Number(e.target.value) || 5)}
                 />
               </label>
             )}
-          </div>
 
-          {(config.packMode === 'grade' ||
-            config.packMode === 'group_rows' ||
-            config.packMode === 'group_cols') && (
-            <div className="grid-2">
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={config.useNativeDpi}
+                onChange={(e) => updateConfig('useNativeDpi', e.target.checked)}
+              />
+              <span>Qualidade nativa do PNG</span>
+            </label>
+
+            {!config.useNativeDpi && (
               <label className="field">
-                <span>
-                  {config.packMode === 'group_cols'
-                    ? 'Espaçamento entre colunas (mm)'
-                    : 'Espaçamento horizontal (mm)'}
-                </span>
+                <span>Forçar DPI</span>
                 <input
                   type="number"
-                  min={0}
-                  step={0.5}
-                  value={config.gapXMm}
-                  onChange={(e) => updateConfig('gapXMm', Number(e.target.value) || 0)}
+                  min={72}
+                  max={2400}
+                  step={1}
+                  value={config.dpi}
+                  onChange={(e) => updateConfig('dpi', Number(e.target.value) || 300)}
                 />
               </label>
-              <label className="field">
-                <span>
-                  {config.packMode === 'group_cols'
-                    ? 'Espaçamento vertical na coluna (mm)'
-                    : 'Espaçamento entre linhas (mm)'}
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={config.gapYMm}
-                  onChange={(e) => updateConfig('gapYMm', Number(e.target.value) || 0)}
-                />
-              </label>
-            </div>
-          )}
-          {(config.packMode === 'grade' ||
-            config.packMode === 'group_rows' ||
-            config.packMode === 'group_cols') && (
-            <p className="hint">
-              Use gaps X e Y baixos (ex.: 1 mm) para uma grade rente — como no Organizador
-              Nesting. No modo &quot;Aproveitar espaço&quot; vale o gap único.
-            </p>
-          )}
+            )}
 
-          <fieldset className="pack-mode">
-            <legend>Modo de montagem</legend>
-            <label className="radio">
-              <input
-                type="radio"
-                name="packMode"
-                checked={config.packMode === 'maxrects'}
-                onChange={() => updateConfig('packMode', 'maxrects')}
-              />
-              <span>Aproveitar espaço</span>
-            </label>
-            <label className="radio">
-              <input
-                type="radio"
-                name="packMode"
-                checked={config.packMode === 'grade'}
-                onChange={() => updateConfig('packMode', 'grade')}
-              />
-              <span>Grade — linhas e colunas</span>
-            </label>
-            <label className="radio">
-              <input
-                type="radio"
-                name="packMode"
-                checked={config.packMode === 'group_rows'}
-                onChange={() => updateConfig('packMode', 'group_rows')}
-              />
-              <span>Agrupar por arte — fileiras (mesma arte junta)</span>
-            </label>
-            <label className="radio">
-              <input
-                type="radio"
-                name="packMode"
-                checked={config.packMode === 'group_cols'}
-                onChange={() => updateConfig('packMode', 'group_cols')}
-              />
-              <span>Agrupar por arte — colunas (mesma arte junta)</span>
-            </label>
-            <p className="hint">
-              <strong>Grade</strong> = como Organizador Nesting (rente, enche a largura
-              esquerda→direita e sobe de linha; mistura artes; só abre nova folha quando a
-              peça não cabe mais na atual). Agrupar mantém a mesma arte junta para recorte
-              com tesoura. &quot;Aproveitar espaço&quot; usa MaxRects e pode misturar artes.
-            </p>
-          </fieldset>
-
-          <div className="grid-2">
             <label className="field">
-              <span>Lado maior (cm)</span>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={config.maxSideCm}
-                onChange={(e) => updateConfig('maxSideCm', Number(e.target.value) || 5)}
-              />
-            </label>
-            <label className="field">
-              <span>Sensibilidade do corte (alpha 0–255)</span>
+              <span>Sensib. corte (alpha)</span>
               <input
                 type="number"
                 min={0}
@@ -917,324 +950,37 @@ export default function App() {
                 value={config.alphaThreshold}
                 disabled={!config.trimEnabled}
                 onChange={(e) =>
-                  updateConfig('alphaThreshold', Math.min(255, Math.max(0, Number(e.target.value) || 8)))
+                  updateConfig(
+                    'alphaThreshold',
+                    Math.min(255, Math.max(0, Number(e.target.value) || 8)),
+                  )
                 }
               />
             </label>
-          </div>
 
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={config.trimEnabled}
-              onChange={(e) => updateConfig('trimEnabled', e.target.checked)}
-            />
-            <span>Cortar bordas transparentes</span>
-          </label>
-          <p className="hint">
-            Remove o padding transparente em volta da arte (bounding box do alpha). Valores
-            muito baixos (ex.: 1) podem deixar “poeira” invisível nas bordas (alpha=1) e o
-            corte não encolhe; 8–16 costuma ser o melhor para packs PNG. Valores maiores
-            cortam mais as bordas suaves/semi-transparentes. Com o corte desligado, usa a
-            arte original completa.
-          </p>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={skipDuplicateNames}
+                onChange={(e) => setSkipDuplicateNames(e.target.checked)}
+              />
+              <span>Ignorar duplicatas</span>
+            </label>
 
-          <p className="hint">
-            Gire arte por arte (botão 90°); todas as cópias da mesma arte ficam iguais.
-          </p>
-          <p className="hint">
-            Modo &quot;lado maior&quot;: se a arte for mais larga que alta, a largura impressa = lado
-            maior; senão a altura. Proporção sempre preservada.
-          </p>
-        </section>
-
-        {/* Importar */}
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <p className="section-kicker">Artes</p>
-              <h2 className="card-title">Importar PNGs</h2>
-              <p className="card-desc">Arquivos ou pasta inteira · corte automático opcional</p>
-            </div>
-          </div>
-          <div className="import-actions">
-            <button type="button" className="btn primary" onClick={() => fileInputRef.current?.click()} disabled={loading}>
-              Selecionar PNGs
-            </button>
-            <button type="button" className="btn secondary" onClick={() => folderInputRef.current?.click()} disabled={loading}>
-              Selecionar pasta
-            </button>
-            {arts.length > 0 && (
-              <button type="button" className="btn danger" onClick={clearArts}>
-                Limpar tudo
-              </button>
-            )}
-          </div>
-          <label className="checkbox" style={{ marginTop: '0.65rem' }}>
-            <input
-              type="checkbox"
-              checked={skipDuplicateNames}
-              onChange={(e) => setSkipDuplicateNames(e.target.checked)}
-            />
-            <span>Ignorar duplicatas (mesmo nome + tamanho)</span>
-          </label>
-          <p className="hint">
-            <strong>Selecionar pasta</strong> só lê os PNGs no navegador — não grava nem copia
-            na pasta. Se aparecerem cópias no Windows, confira o Organizador Nesting ou a pasta
-            de Downloads.
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,.png"
-            multiple
-            hidden
-            onChange={(e) => e.target.files && void importFiles(e.target.files)}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            accept="image/png,.png"
-            multiple
-            hidden
-            onChange={(e) => e.target.files && void importFiles(e.target.files)}
-          />
-          {(status || loading) && (
-            <p className={statusClass || 'status-banner'}>
-              {loading && !status ? 'Aguarde…' : status}
-            </p>
-          )}
-        </section>
-
-        {/* Artes */}
-        <section className="card">
-          <div className="section-head">
-            <div>
-              <p className="section-kicker">Artes</p>
-              <h2>Lista de artes ({arts.length})</h2>
-            </div>
-            {arts.length > 0 && (
-              <div className="art-toolbar">
-                <button type="button" className="btn sm" onClick={selectAllArts} title="Marcar todas as artes">
-                  Selecionar todas
-                </button>
-                <button type="button" className="btn sm" onClick={clearSelection} title="Desmarcar todas">
-                  Limpar seleção
-                </button>
-                <button
-                  type="button"
-                  className="btn sm primary"
-                  onClick={handleDividirIguais}
-                  title="Define a mesma quantidade máxima Q para as artes marcadas, cabendo tudo em 1 folha"
-                >
-                  Dividir iguais na folha
-                </button>
-                <button
-                  type="button"
-                  className="btn sm"
-                  onClick={handleRotateSelected}
-                  title="Alterna rotação 90° nas artes marcadas (todas as cópias de cada arte ficam iguais)"
-                >
-                  Girar 90° selecionadas
-                </button>
-              </div>
-            )}
-          </div>
-          {arts.length === 0 ? (
-            <div className="empty-state">
-              <p className="empty-state-title">Nenhuma arte ainda</p>
-              <p className="empty-state-desc">
-                Importe PNGs transparentes acima para montar a folha. Use &quot;Selecionar pasta&quot;
-                para lotes do Mercado Livre.
+            <details className="folha-hints">
+              <summary>Dicas de montagem</summary>
+              <p className="hint">
+                <strong>Grade</strong> enche a largura esquerda→direita. Agrupar mantém a
+                mesma arte junta. Em sob medida a altura cresce até {MAX_AUTO_HEIGHT_CM} cm.
+                Preview usa até {PREVIEW_DPI_CAP} DPI; export reempacota no DPI completo (~
+                {nativeDpi}).
               </p>
-            </div>
-          ) : (
-            <div className="art-table-wrap">
-              <table className="art-table">
-                <thead>
-                  <tr>
-                    <th title="Seleção para Dividir iguais">
-                      <span className="sr-only">Sel.</span>
-                    </th>
-                    <th></th>
-                    <th>px (orig. → corte)</th>
-                    <th>Qtd</th>
-                    <th>Lado maior (cm)</th>
-                    <th>W × H (cm)</th>
-                    <th title="Rotação 90° desta arte (todas as cópias)">90°</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {artRows.map(({ art, ps }) => {
-                    const sizeChanged =
-                      art.originalWidthPx !== art.trimmedWidthPx ||
-                      art.originalHeightPx !== art.trimmedHeightPx
-                    const pxLabel = sizeChanged
-                      ? `${formatPxSize(art.originalWidthPx, art.originalHeightPx)} → ${formatPxSize(art.trimmedWidthPx, art.trimmedHeightPx)}`
-                      : formatPxSize(art.originalWidthPx, art.originalHeightPx)
-                    return (
-                      <tr key={art.id} className={ps.error ? 'row-error' : undefined}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={!!selectedIds[art.id]}
-                            onChange={() => toggleSelect(art.id)}
-                            title="Incluir em Dividir iguais"
-                            aria-label={`Selecionar ${art.name}`}
-                          />
-                        </td>
-                        <td>
-                          <div
-                            className={`thumb checker${art.rotate90 ? ' thumb-rotated' : ''}`}
-                            title={art.name}
-                          >
-                            <img src={art.thumbnailUrl} alt={art.name} />
-                          </div>
-                        </td>
-                        <td className="mono px-size" title={pxLabel}>
-                          {pxLabel}
-                          {ps.error && <small className="err">{ps.error}</small>}
-                        </td>
-                        <td>
-                          <input
-                            className="qty"
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={art.quantity}
-                            onChange={(e) => setQty(art.id, Number(e.target.value))}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="override"
-                            type="number"
-                            min={0.1}
-                            step={0.1}
-                            placeholder={String(config.maxSideCm)}
-                            value={art.maxSideCmOverride ?? ''}
-                            onChange={(e) => setArtMaxSide(art.id, e.target.value)}
-                            title="Deixe vazio para usar o global"
-                          />
-                        </td>
-                        <td className="mono">
-                          {ps.widthCm.toFixed(2)} × {ps.heightCm.toFixed(2)}
-                          {art.rotate90 ? ' ↻' : ''}
-                        </td>
-                        <td className="rot-cell">
-                          <button
-                            type="button"
-                            className={`btn sm${art.rotate90 ? ' primary' : ''}`}
-                            aria-pressed={art.rotate90}
-                            onClick={() => toggleRotate90(art.id)}
-                            title="Girar esta arte 90° (todas as cópias ficam iguais)"
-                          >
-                            90°
-                          </button>
-                        </td>
-                        <td className="row-actions">
-                          <button
-                            type="button"
-                            className="btn sm"
-                            disabled={!!ps.error}
-                            onClick={() => handleEncherFolha(art.id)}
-                            title="Define a quantidade máxima desta arte sozinha em 1 folha"
-                          >
-                            Encher folha
-                          </button>
-                          <button
-                            type="button"
-                            className="btn sm"
-                            onClick={() => downloadArtPng(art)}
-                            title="Baixa o PNG atual desta arte (cortado se o corte estiver ligado)"
-                          >
-                            Baixar cortada
-                          </button>
-                          <button type="button" className="btn sm danger" onClick={() => removeArt(art.id)}>
-                            Remover
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+            </details>
+          </section>
+        </aside>
 
-        {/* Exportação */}
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <p className="section-kicker">Exportar</p>
-              <h2 className="card-title">Salvar folhas</h2>
-              <p className="card-desc">Nome do cliente, recorte e download</p>
-            </div>
-          </div>
-
-          <label className="field">
-            <span>Nome do cliente</span>
-            <input
-              type="text"
-              value={clientName}
-              placeholder="Ex.: Maria Silva (opcional)"
-              onChange={(e) => setClientName(e.target.value)}
-              maxLength={80}
-            />
-          </label>
-          <p className="hint">
-            Se preenchido, os arquivos saem como{' '}
-            <code>{'{Cliente}_gang.png'}</code> ou{' '}
-            <code>{'{Cliente}_folha-01.png'}</code> / ZIP{' '}
-            <code>{'{Cliente}_folhas.zip'}</code>.
-          </p>
-
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={config.cropEmptyExport}
-              onChange={(e) => updateConfig('cropEmptyExport', e.target.checked)}
-            />
-            <span>Recortar espaços vazios no export</span>
-          </label>
-          <p className="hint">
-            Gera PNG só da área com artes + margem ({config.marginMm} mm), sem a folha
-            vazia em volta. Mantém DPI (pHYs). Ligado por padrão em folha sob medida.
-          </p>
-
-          <div className="export-actions" style={{ marginTop: '0.75rem' }}>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={arts.length === 0}
-              onClick={handlePreencherSobras}
-              title="Após o pedido: adiciona cópias extras só no espaço vazio, sem criar novas folhas"
-            >
-              Preencher sobras
-            </button>
-            {sheets.length > 0 && (
-              <button
-                type="button"
-                className="btn primary"
-                disabled={exporting}
-                onClick={handleExportAll}
-              >
-                {sheets.length === 1 ? 'Baixar PNG' : 'Baixar todas (ZIP)'}
-              </button>
-            )}
-          </div>
-          {(status || loading || exporting) && (
-            <p className={statusClass || 'status-banner'}>
-              {loading && !status ? 'Aguarde…' : status}
-            </p>
-          )}
-        </section>
-        </div>{/* /.folha-sidebar */}
-
-        {/* Preview sticky à direita */}
-        <aside className="folha-preview-pane">
+        {/* CENTRO — preview */}
+        <section className="folha-preview-pane">
           <div className="folha-preview-sticky">
             <div className="result-head">
               <div>
@@ -1252,10 +998,10 @@ export default function App() {
             {isAutoHeight && sheets.length > 0 && usedReadout != null && (
               <div className="used-readout" role="status">
                 <div className="used-readout-main">
-                  <strong>Usado: {usedReadout.toFixed(1)} cm de altura</strong>
+                  <strong>Usado: {usedReadout.toFixed(1)} cm</strong>
                   <span>
                     Largura {config.widthCm} cm
-                    {utilReadout != null ? ` · Aproveitamento ${utilReadout.toFixed(1)}%` : ''}
+                    {utilReadout != null ? ` · ${utilReadout.toFixed(1)}%` : ''}
                   </span>
                 </div>
                 <div className="used-bar" aria-hidden>
@@ -1266,9 +1012,6 @@ export default function App() {
                     }}
                   />
                 </div>
-                <p className="hint" style={{ marginTop: '0.35rem' }}>
-                  Limite {MAX_AUTO_HEIGHT_CM} cm · ~{effectiveDpi} DPI
-                </p>
               </div>
             )}
 
@@ -1297,10 +1040,10 @@ export default function App() {
                 </p>
                 <p className="empty-state-desc">
                   {arts.length === 0
-                    ? 'Importe artes à esquerda — a pré-visualização aparece aqui ao vivo.'
+                    ? 'Importe PNGs na barra superior — a prévia aparece aqui.'
                     : packFatalError
                       ? packFatalError
-                      : 'Verifique erros de tamanho, quantidades zeradas ou se a arte cabe na folha.'}
+                      : 'Verifique tamanhos, quantidades ou se a arte cabe na folha.'}
                 </p>
               </div>
             ) : (
@@ -1309,17 +1052,15 @@ export default function App() {
                   <div key={sheet.index} className="sheet-card sheet-card-large">
                     <div className="sheet-meta">
                       <strong>
-                        {isAutoHeight
-                          ? 'Tira contínua'
-                          : `Folha ${sheet.index + 1}`}
+                        {isAutoHeight ? 'Tira contínua' : `Folha ${sheet.index + 1}`}
                       </strong>
                       <span>
                         {isAutoHeight
                           ? `${config.widthCm} × ${sheet.usedHeightCm?.toFixed(1) ?? '?'} cm`
                           : `${config.widthCm} × ${config.heightCm} cm`}
                         {' · '}
-                        {sheet.placements.length} peça(s) · ~{effectiveDpi} DPI
-                        {config.cropEmptyExport ? ' · export recortado' : ''}
+                        {sheet.placements.length} peça(s)
+                        {config.cropEmptyExport ? ' · recortado' : ''}
                       </span>
                       <button
                         type="button"
@@ -1327,7 +1068,7 @@ export default function App() {
                         disabled={exporting}
                         onClick={() => handleExportOne(sheet)}
                       >
-                        Baixar PNG
+                        PNG
                       </button>
                     </div>
                     <div className="sheet-preview checker">
@@ -1345,10 +1086,162 @@ export default function App() {
               </div>
             )}
           </div>
+        </section>
+
+        {/* DIREITA — lista de artes compacta */}
+        <aside className="folha-arts">
+          <section className="card folha-card folha-arts-card">
+            <div className="folha-card-head folha-arts-head">
+              <div>
+                <p className="section-kicker">Artes</p>
+                <h2>Lista ({arts.length})</h2>
+              </div>
+              {arts.length > 0 && (
+                <div className="art-toolbar">
+                  <button type="button" className="btn sm" onClick={selectAllArts}>
+                    Todas
+                  </button>
+                  <button type="button" className="btn sm" onClick={clearSelection}>
+                    Nenhuma
+                  </button>
+                  <button
+                    type="button"
+                    className="btn sm primary"
+                    onClick={handleDividirIguais}
+                    title="Mesma qtd máxima nas marcadas, 1 folha"
+                  >
+                    Dividir iguais
+                  </button>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleRotateSelected}
+                    title="Girar 90° nas selecionadas"
+                  >
+                    90° sel.
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {arts.length === 0 ? (
+              <div className="empty-state">
+                <p className="empty-state-title">Nenhuma arte</p>
+                <p className="empty-state-desc">
+                  Use Importar PNGs ou Pasta na barra superior.
+                </p>
+              </div>
+            ) : (
+              <div className="art-table-wrap">
+                <table className="art-table art-table-compact">
+                  <thead>
+                    <tr>
+                      <th title="Seleção">
+                        <span className="sr-only">Sel.</span>
+                      </th>
+                      <th></th>
+                      <th>Qtd</th>
+                      <th>Lado</th>
+                      <th>cm</th>
+                      <th>90°</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {artRows.map(({ art, ps }) => (
+                      <tr key={art.id} className={ps.error ? 'row-error' : undefined}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={!!selectedIds[art.id]}
+                            onChange={() => toggleSelect(art.id)}
+                            aria-label={`Selecionar ${art.name}`}
+                          />
+                        </td>
+                        <td>
+                          <div
+                            className={`thumb checker${art.rotate90 ? ' thumb-rotated' : ''}`}
+                            title={art.name}
+                          >
+                            <img src={art.thumbnailUrl} alt={art.name} />
+                          </div>
+                        </td>
+                        <td>
+                          <input
+                            className="qty"
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={art.quantity}
+                            onChange={(e) => setQty(art.id, Number(e.target.value))}
+                            aria-label={`Quantidade ${art.name}`}
+                          />
+                          {ps.error && <small className="err">{ps.error}</small>}
+                        </td>
+                        <td>
+                          <input
+                            className="override"
+                            type="number"
+                            min={0.1}
+                            step={0.1}
+                            placeholder={String(config.maxSideCm)}
+                            value={art.maxSideCmOverride ?? ''}
+                            onChange={(e) => setArtMaxSide(art.id, e.target.value)}
+                            title="Lado maior cm (vazio = global)"
+                            aria-label={`Lado maior ${art.name}`}
+                          />
+                        </td>
+                        <td className="mono art-cm" title={art.name}>
+                          {ps.widthCm.toFixed(1)}×{ps.heightCm.toFixed(1)}
+                          {art.rotate90 ? ' ↻' : ''}
+                        </td>
+                        <td className="rot-cell">
+                          <button
+                            type="button"
+                            className={`btn sm${art.rotate90 ? ' primary' : ''}`}
+                            aria-pressed={art.rotate90}
+                            onClick={() => toggleRotate90(art.id)}
+                            title="Girar 90°"
+                          >
+                            90°
+                          </button>
+                        </td>
+                        <td className="row-actions">
+                          <button
+                            type="button"
+                            className="btn sm"
+                            disabled={!!ps.error}
+                            onClick={() => handleEncherFolha(art.id)}
+                            title="Encher folha com esta arte"
+                          >
+                            Encher
+                          </button>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => downloadArtPng(art)}
+                            title="Baixar PNG cortado"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={() => removeArt(art.id)}
+                            title="Remover"
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </aside>
       </main>
-
     </div>
   )
 }
-
