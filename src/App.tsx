@@ -15,7 +15,7 @@ import {
   loadPngAsCanvas,
   makeThumbnailDataUrl,
 } from './utils/trim'
-import { buildPreviewUrl, getArtPrintSize, packArts } from './utils/pack'
+import { buildPreviewUrl, getArtPrintSize, packArts, scalePackedSheet } from './utils/pack'
 import {
   fillLeftoverQuantities,
   maxEqualQtyOnOneSheet,
@@ -27,7 +27,7 @@ import {
   downloadAllSheetsZip,
   downloadSheetPng,
 } from './utils/exportPng'
-import { computeNativeExportDpi, resolveExportDpi } from './utils/units'
+import { cmToPx, computeNativeExportDpi, resolveExportDpi, roundPx } from './utils/units'
 import './App.css'
 
 /** DPI máximo para packing/preview ao vivo (export reempacota no DPI nativo). */
@@ -546,15 +546,44 @@ export default function App() {
     [config.cropEmptyExport, config.marginMm],
   )
 
-  /** Reempacota no DPI nativo para export (preview usa DPI limitado). */
+  /**
+   * Reempacota no DPI nativo para export (preview fica em ≤150 DPI).
+   * Se o re-pack nativo falhar (memória), escala o layout do preview → DPI nativo
+   * mantendo as artes em resolução plena (nunca exporta a folha de preview).
+   */
   const packForExport = (): PackedSheet[] => {
-    const { sheets: packed, errors } = packArts(arts, exportPackConfig, {
-      skipPreview: true,
-    })
-    if (errors.length > 0 && packed.length === 0) {
-      throw new Error(errors[0] ?? 'Nada para exportar.')
+    const expectedW = roundPx(cmToPx(config.widthCm, effectiveDpi))
+    const looksNative = (w: number) => w >= expectedW * 0.55
+
+    try {
+      const { sheets: packed, errors } = packArts(arts, exportPackConfig, {
+        skipPreview: true,
+      })
+      if (packed.length > 0) {
+        if (!looksNative(packed[0].widthPx)) {
+          throw new Error(
+            `Resolução de export suspeita (${packed[0].widthPx}px; esperado ~${expectedW}px a ${effectiveDpi} DPI).`,
+          )
+        }
+        return packed
+      }
+      if (errors.length > 0) {
+        throw new Error(errors[0] ?? 'Nada para exportar.')
+      }
+    } catch (e) {
+      console.warn('Reempacote em DPI nativo falhou; escalando layout do preview.', e)
     }
-    return packed
+
+    if (sheets.length === 0) {
+      throw new Error('Nada para exportar. Importe artes e aguarde a pré-visualização.')
+    }
+    const scaled = sheets.map((s) => scalePackedSheet(s, previewDpi, effectiveDpi))
+    if (!looksNative(scaled[0].widthPx)) {
+      throw new Error(
+        `Falha ao gerar folha em DPI nativo (~${effectiveDpi}). Tente “Recortar espaços vazios” ou DPI forçado menor.`,
+      )
+    }
+    return scaled
   }
 
   const handleExportOne = async (sheet: PackedSheet) => {
@@ -567,7 +596,9 @@ export default function App() {
       if (!target) throw new Error('Folha não encontrada após reempacotar para export.')
       const filename = buildSheetFilename(target, exportSheets.length, clientName)
       await downloadSheetPng(target, effectiveDpi, filename, exportOpts)
-      setStatus(`Folha ${sheet.index + 1} exportada (~${effectiveDpi} DPI).`)
+      setStatus(
+        `Folha ${sheet.index + 1} exportada: ${target.widthPx}×${target.heightPx} px · ~${effectiveDpi} DPI (nativo).`,
+      )
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar PNG.')
     } finally {
@@ -596,7 +627,10 @@ export default function App() {
           clientName,
         )
       }
-      setStatus(`Exportação concluída (~${effectiveDpi} DPI · ${exportSheets.length} folha(s)).`)
+      const sample = exportSheets[0]
+      setStatus(
+        `Exportação concluída: ${sample.widthPx}×${sample.heightPx} px · ~${effectiveDpi} DPI nativo · ${exportSheets.length} folha(s).`,
+      )
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar.')
     } finally {

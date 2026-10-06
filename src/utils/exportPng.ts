@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import type { PackedPlacement, PackedSheet } from '../types'
 import {
+  applyDrawSmoothing,
   getCropRect,
   renderSheetCanvas,
   renderSheetStrip,
@@ -139,13 +140,6 @@ function canvasToPngBuffer(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
   })
 }
 
-function needsTiledRender(widthPx: number, heightPx: number): boolean {
-  const maxDim = getMaxCanvasDimension()
-  if (widthPx > maxDim || heightPx > maxDim) return true
-  if (widthPx * heightPx > SAFE_MAX_AREA) return true
-  return false
-}
-
 function tryCreateCanvas(width: number, height: number): boolean {
   try {
     const c = document.createElement('canvas')
@@ -204,31 +198,13 @@ function renderTile(
     if (p.y + p.height <= clipY || p.y >= clipBottom) continue
 
     ctx.save()
-    const srcW = p.source.width
-    const srcH = p.source.height
     if (p.rotated) {
-      const exact = srcW === p.height && srcH === p.width
-      ctx.imageSmoothingEnabled = !exact
-      if (!exact) {
-        try {
-          ctx.imageSmoothingQuality = 'high'
-        } catch {
-          /* ok */
-        }
-      }
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.height, p.width)
       ctx.translate(p.x - clipX + p.width, p.y - clipY)
       ctx.rotate(Math.PI / 2)
       ctx.drawImage(p.source, 0, 0, p.height, p.width)
     } else {
-      const exact = srcW === p.width && srcH === p.height
-      ctx.imageSmoothingEnabled = !exact
-      if (!exact) {
-        try {
-          ctx.imageSmoothingQuality = 'high'
-        } catch {
-          /* ok */
-        }
-      }
+      applyDrawSmoothing(ctx, p.source.width, p.source.height, p.width, p.height)
       ctx.drawImage(p.source, p.x - clipX, p.y - clipY, p.width, p.height)
     }
     ctx.restore()
@@ -474,11 +450,16 @@ export async function sheetToPngBlob(
     pls = geo.placements
   }
 
-  if (!needsTiledRender(widthPx, heightPx) && tryCreateCanvas(widthPx, heightPx)) {
+  // Preferir encoder PNG nativo do browser (toBlob) sempre que o canvas couber.
+  // SAFE_MAX_AREA não bloqueia mais: só caímos em faixas/ZIP se createCanvas falhar.
+  if (tryCreateCanvas(widthPx, heightPx)) {
     try {
       const canvas = renderSheetCanvas(widthPx, heightPx, pls)
-      const buf = await canvasToPngBuffer(canvas)
-      return injectPhysChunk(buf, dpi)
+      // Sanity: canvas real bate com o pedido (evita canvas “clampado” silencioso)
+      if (canvas.width === widthPx && canvas.height === heightPx) {
+        const buf = await canvasToPngBuffer(canvas)
+        return injectPhysChunk(buf, dpi)
+      }
     } catch {
       /* tiled */
     }

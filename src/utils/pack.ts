@@ -38,8 +38,21 @@ export function getArtPrintSize(art: ArtItem, config: SheetConfig): ArtPrintSize
     ;[widthCm, heightCm] = [heightCm, widthCm]
   }
 
-  const widthPx = roundPx(cmToPx(widthCm, config.dpi))
-  const heightPx = roundPx(cmToPx(heightCm, config.dpi))
+  // Destino em px a partir do DPI. Em DPI nativo, trava no tamanho da arte
+  // (1:1) para não upscalear 1–2 px com smoothing (borra a arte).
+  let widthPx = roundPx(cmToPx(widthCm, config.dpi))
+  let heightPx = roundPx(cmToPx(heightCm, config.dpi))
+  const srcW = rotated ? art.trimmedHeightPx : art.trimmedWidthPx
+  const srcH = rotated ? art.trimmedWidthPx : art.trimmedHeightPx
+  if (
+    srcW > 0 &&
+    srcH > 0 &&
+    Math.abs(widthPx - srcW) <= 2 &&
+    Math.abs(heightPx - srcH) <= 2
+  ) {
+    widthPx = srcW
+    heightPx = srcH
+  }
 
   const sheetW = roundPx(cmToPx(config.widthCm, config.dpi))
   const grow = config.sheetGrowMode === 'auto_height'
@@ -91,6 +104,48 @@ export interface PackArtsOptions {
    * Folhas além disso ficam com previewUrl vazio (lazy / sob demanda na UI).
    */
   maxPreviewSheets?: number
+}
+
+/**
+ * Escala layout empacotado de fromDpi → toDpi (ex.: preview 150 → nativo ~780).
+ * Mantém as mesmas fontes (canvas trimmed em resolução plena) — só multiplica geometria.
+ * Usado no export para garantir DPI nativo mesmo se o re-pack direto falhar.
+ */
+export function scalePackedSheet(
+  sheet: PackedSheet,
+  fromDpi: number,
+  toDpi: number,
+): PackedSheet {
+  const s = toDpi / Math.max(1e-6, fromDpi)
+  if (Math.abs(s - 1) < 1e-6) {
+    return { ...sheet, previewUrl: '' }
+  }
+  return {
+    index: sheet.index,
+    widthPx: roundPx(sheet.widthPx * s),
+    heightPx: roundPx(sheet.heightPx * s),
+    usedHeightCm: sheet.usedHeightCm,
+    utilizationPct: sheet.utilizationPct,
+    previewUrl: '',
+    placements: sheet.placements.map((p) => {
+      let width = Math.max(1, Math.round(p.width * s))
+      let height = Math.max(1, Math.round(p.height * s))
+      // Trava 1:1 na arte quando o destino escalado fica a ≤2px da fonte
+      const srcW = p.rotated ? p.source.height : p.source.width
+      const srcH = p.rotated ? p.source.width : p.source.height
+      if (Math.abs(width - srcW) <= 2 && Math.abs(height - srcH) <= 2) {
+        width = srcW
+        height = srcH
+      }
+      return {
+        ...p,
+        x: Math.round(p.x * s),
+        y: Math.round(p.y * s),
+        width,
+        height,
+      }
+    }),
+  }
 }
 
 export function buildPreviewUrl(
@@ -670,15 +725,19 @@ export function packArts(
   return { sheets, errors, printSizes }
 }
 
-/** Aplica smoothing só quando há reamostragem; 1:1 fica nítido. */
-function applyDrawSmoothing(
+/** Aplica smoothing só quando há reamostragem real; ~1:1 fica nítido (sem blur). */
+export function applyDrawSmoothing(
   ctx: CanvasRenderingContext2D,
   srcW: number,
   srcH: number,
   dstW: number,
   dstH: number,
 ): void {
-  const exact = srcW === dstW && srcH === dstH
+  const exact =
+    (srcW === dstW && srcH === dstH) ||
+    (Math.abs(srcW - dstW) <= 1 && Math.abs(srcH - dstH) <= 1) ||
+    (Math.abs(srcW / Math.max(1, dstW) - 1) < 0.012 &&
+      Math.abs(srcH / Math.max(1, dstH) - 1) < 0.012)
   if (exact) {
     ctx.imageSmoothingEnabled = false
     return
