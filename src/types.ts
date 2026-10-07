@@ -46,13 +46,13 @@ export interface SheetConfig {
    */
   packMode: PackMode
   /**
-   * DPI usado quando useNativeDpi=false (forçar DPI avançado).
-   * Com qualidade nativa, o DPI efetivo vem das artes importadas.
+   * DPI do export quando useNativeDpi=false (presets Alta/Rápida/Personalizado).
+   * Com qualidade Máxima (nativo), o DPI efetivo vem das artes importadas.
    */
   dpi: number
   /**
-   * Se true (padrão), empacota e exporta no DPI nativo das PNGs
-   * (sem reduzir qualidade). Se false, usa `dpi` forçado.
+   * Se true (padrão = Máxima), empacota e exporta no DPI nativo das PNGs.
+   * Se false, usa `dpi` (ex.: 300 Alta, 150 Rápida). Preview permanece limitado.
    */
   useNativeDpi: boolean
   maxSideCm: number

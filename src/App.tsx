@@ -30,12 +30,61 @@ import {
 import { cmToPx, computeNativeExportDpi, resolveExportDpi, roundPx } from './utils/units'
 import './App.css'
 
-/** DPI máximo para packing/preview ao vivo (export reempacota no DPI nativo). */
+/** DPI máximo para packing/preview ao vivo (export reempacota no DPI escolhido). */
 const PREVIEW_DPI_CAP = 150
+/** Presets de qualidade do PNG exportado (preview permanece ≤ PREVIEW_DPI_CAP). */
+const EXPORT_DPI_HIGH = 300
+const EXPORT_DPI_FAST = 150
 /** Debounce do packing ao vivo (ms). */
 const PACK_DEBOUNCE_MS = 320
 /** Quantas folhas geram previewUrl de uma vez (resto sob demanda). */
 const MAX_LIVE_PREVIEW_SHEETS = 6
+
+type ExportQualityPreset = 'native' | 'high' | 'fast' | 'custom'
+
+function getExportQuality(config: SheetConfig): ExportQualityPreset {
+  if (config.useNativeDpi !== false) return 'native'
+  if (config.dpi === EXPORT_DPI_HIGH) return 'high'
+  if (config.dpi === EXPORT_DPI_FAST) return 'fast'
+  return 'custom'
+}
+
+function applyExportQuality(
+  config: SheetConfig,
+  quality: ExportQualityPreset,
+  nativeDpiFallback: number,
+): SheetConfig {
+  switch (quality) {
+    case 'native':
+      return { ...config, useNativeDpi: true }
+    case 'high':
+      return { ...config, useNativeDpi: false, dpi: EXPORT_DPI_HIGH }
+    case 'fast':
+      return { ...config, useNativeDpi: false, dpi: EXPORT_DPI_FAST }
+    case 'custom':
+      return {
+        ...config,
+        useNativeDpi: false,
+        dpi:
+          config.useNativeDpi !== false
+            ? Math.max(72, Math.round(nativeDpiFallback) || EXPORT_DPI_HIGH)
+            : config.dpi,
+      }
+  }
+}
+
+function exportQualityLabel(quality: ExportQualityPreset, dpi: number): string {
+  switch (quality) {
+    case 'native':
+      return `Máxima (nativo ~${dpi})`
+    case 'high':
+      return 'Alta (300 DPI)'
+    case 'fast':
+      return 'Rápida (150 DPI)'
+    case 'custom':
+      return `Personalizado (${dpi} DPI)`
+  }
+}
 
 function uid(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -464,7 +513,7 @@ export default function App() {
     }, 'image/png')
   }
 
-  /** DPI efetivo: nativo das PNGs (padrão) ou forçado. */
+  /** DPI efetivo do export: nativo das PNGs (padrão) ou forçado pelo preset. */
   const effectiveDpi = useMemo(
     () => resolveExportDpi(arts, config),
     [arts, config],
@@ -475,7 +524,16 @@ export default function App() {
     [arts, config],
   )
 
-  /** Config de export — dpi nativo/forçado completo. */
+  const exportQuality = useMemo(() => getExportQuality(config), [config])
+
+  const setExportQuality = useCallback(
+    (quality: ExportQualityPreset) => {
+      setConfig((c) => applyExportQuality(c, quality, computeNativeExportDpi(arts, c)))
+    },
+    [arts],
+  )
+
+  /** Config de export — dpi nativo ou preset (nunca o DPI do preview). */
   const exportPackConfig = useMemo(
     () => ({ ...config, dpi: effectiveDpi }),
     [config, effectiveDpi],
@@ -486,6 +544,17 @@ export default function App() {
     () => Math.min(effectiveDpi, PREVIEW_DPI_CAP),
     [effectiveDpi],
   )
+
+  /** Estimativa de px do PNG exportado (largura × altura da folha no DPI escolhido). */
+  const exportSizeEstimate = useMemo(() => {
+    const w = roundPx(cmToPx(config.widthCm, effectiveDpi))
+    const hCm =
+      config.sheetGrowMode === 'auto_height' && sheets[0]?.usedHeightCm
+        ? sheets[0].usedHeightCm
+        : config.heightCm
+    const h = roundPx(cmToPx(hCm, effectiveDpi))
+    return { w, h }
+  }, [config.widthCm, config.heightCm, config.sheetGrowMode, effectiveDpi, sheets])
 
   const previewPackConfig = useMemo(
     () => ({ ...config, dpi: previewDpi }),
@@ -547,20 +616,20 @@ export default function App() {
   )
 
   /**
-   * Reempacota no DPI nativo para export (preview fica em ≤150 DPI).
-   * Se o re-pack nativo falhar (memória), escala o layout do preview → DPI nativo
-   * mantendo as artes em resolução plena (nunca exporta a folha de preview).
+   * Reempacota no DPI de export escolhido (preview fica em ≤150 DPI).
+   * Se o re-pack falhar (memória), escala o layout do preview → DPI de export
+   * mantendo as artes em resolução plena (nunca exporta a folha de preview crua).
    */
   const packForExport = (): PackedSheet[] => {
     const expectedW = roundPx(cmToPx(config.widthCm, effectiveDpi))
-    const looksNative = (w: number) => w >= expectedW * 0.55
+    const looksExportDpi = (w: number) => w >= expectedW * 0.55
 
     try {
       const { sheets: packed, errors } = packArts(arts, exportPackConfig, {
         skipPreview: true,
       })
       if (packed.length > 0) {
-        if (!looksNative(packed[0].widthPx)) {
+        if (!looksExportDpi(packed[0].widthPx)) {
           throw new Error(
             `Resolução de export suspeita (${packed[0].widthPx}px; esperado ~${expectedW}px a ${effectiveDpi} DPI).`,
           )
@@ -571,16 +640,16 @@ export default function App() {
         throw new Error(errors[0] ?? 'Nada para exportar.')
       }
     } catch (e) {
-      console.warn('Reempacote em DPI nativo falhou; escalando layout do preview.', e)
+      console.warn('Reempacote no DPI de export falhou; escalando layout do preview.', e)
     }
 
     if (sheets.length === 0) {
       throw new Error('Nada para exportar. Importe artes e aguarde a pré-visualização.')
     }
     const scaled = sheets.map((s) => scalePackedSheet(s, previewDpi, effectiveDpi))
-    if (!looksNative(scaled[0].widthPx)) {
+    if (!looksExportDpi(scaled[0].widthPx)) {
       throw new Error(
-        `Falha ao gerar folha em DPI nativo (~${effectiveDpi}). Tente “Recortar espaços vazios” ou DPI forçado menor.`,
+        `Falha ao gerar folha em ~${effectiveDpi} DPI. Tente “Recortar espaços vazios” ou qualidade Rápida/Alta.`,
       )
     }
     return scaled
@@ -588,7 +657,8 @@ export default function App() {
 
   const handleExportOne = async (sheet: PackedSheet) => {
     setExporting(true)
-    setStatus(`Exportando folha ${sheet.index + 1} em ~${effectiveDpi} DPI (qualidade do PNG)…`)
+    const qLabel = exportQualityLabel(exportQuality, effectiveDpi)
+    setStatus(`Exportando folha ${sheet.index + 1} · ${qLabel}…`)
     try {
       const exportSheets = packForExport()
       const target =
@@ -597,7 +667,7 @@ export default function App() {
       const filename = buildSheetFilename(target, exportSheets.length, clientName)
       await downloadSheetPng(target, effectiveDpi, filename, exportOpts)
       setStatus(
-        `Folha ${sheet.index + 1} exportada: ${target.widthPx}×${target.heightPx} px · ~${effectiveDpi} DPI (nativo).`,
+        `Folha ${sheet.index + 1} exportada: ${target.widthPx}×${target.heightPx} px · ${effectiveDpi} DPI (${qLabel}).`,
       )
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar PNG.')
@@ -609,7 +679,8 @@ export default function App() {
   const handleExportAll = async () => {
     if (sheets.length === 0) return
     setExporting(true)
-    setStatus(`Exportando em ~${effectiveDpi} DPI (reempacotando na qualidade nativa)…`)
+    const qLabel = exportQualityLabel(exportQuality, effectiveDpi)
+    setStatus(`Exportando · ${qLabel} (reempacotando no DPI escolhido)…`)
     try {
       const exportSheets = packForExport()
       if (exportSheets.length === 0) {
@@ -629,7 +700,7 @@ export default function App() {
       }
       const sample = exportSheets[0]
       setStatus(
-        `Exportação concluída: ${sample.widthPx}×${sample.heightPx} px · ~${effectiveDpi} DPI nativo · ${exportSheets.length} folha(s).`,
+        `Exportação concluída: ${sample.widthPx}×${sample.heightPx} px · ${effectiveDpi} DPI (${qLabel}) · ${exportSheets.length} folha(s).`,
       )
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Erro ao exportar.')
@@ -752,10 +823,29 @@ export default function App() {
           <option value="auto_height">Sob medida / rolo</option>
         </select>
 
-        <span className="folha-tb-dpi" title="DPI de exportação">
-          {config.useNativeDpi
-            ? `~${effectiveDpi} DPI`
-            : `${effectiveDpi} DPI`}
+        <label className="folha-tb-field folha-tb-export-quality">
+          <span>Qualidade export</span>
+          <select
+            className="folha-tb-select"
+            value={exportQuality}
+            onChange={(e) =>
+              setExportQuality(e.target.value as ExportQualityPreset)
+            }
+            title="DPI do PNG exportado (preview continua limitado)"
+            aria-label="Qualidade do export"
+          >
+            <option value="native">Máxima (nativo ~{nativeDpi})</option>
+            <option value="high">Alta (300 DPI)</option>
+            <option value="fast">Rápida (150 DPI)</option>
+            <option value="custom">Personalizado…</option>
+          </select>
+        </label>
+
+        <span
+          className="folha-tb-dpi"
+          title="Tamanho aproximado do PNG no DPI de export escolhido"
+        >
+          ~{exportSizeEstimate.w}×{exportSizeEstimate.h} px · {effectiveDpi} DPI
         </span>
 
         <div className="folha-tb-group folha-tb-export">
@@ -951,28 +1041,42 @@ export default function App() {
               </label>
             )}
 
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={config.useNativeDpi}
-                onChange={(e) => updateConfig('useNativeDpi', e.target.checked)}
-              />
-              <span>Qualidade nativa do PNG</span>
+            <label className="field">
+              <span>Qualidade do export</span>
+              <select
+                value={exportQuality}
+                onChange={(e) =>
+                  setExportQuality(e.target.value as ExportQualityPreset)
+                }
+              >
+                <option value="native">Máxima (nativo ~{nativeDpi})</option>
+                <option value="high">Alta (300 DPI)</option>
+                <option value="fast">Rápida (150 DPI)</option>
+                <option value="custom">Personalizado</option>
+              </select>
             </label>
 
-            {!config.useNativeDpi && (
+            {exportQuality !== 'native' && (
               <label className="field">
-                <span>Forçar DPI</span>
+                <span>DPI do export</span>
                 <input
                   type="number"
                   min={72}
                   max={2400}
                   step={1}
                   value={config.dpi}
-                  onChange={(e) => updateConfig('dpi', Number(e.target.value) || 300)}
+                  onChange={(e) => {
+                    const dpi = Number(e.target.value) || 300
+                    setConfig((c) => ({ ...c, useNativeDpi: false, dpi }))
+                  }}
                 />
               </label>
             )}
+
+            <p className="hint folha-export-dpi-hint">
+              DPI mais baixo = arquivo menor e export mais rápido; resolução cai.
+              Preview continua em até {PREVIEW_DPI_CAP} DPI.
+            </p>
 
             <label className="field">
               <span>Sensib. corte (alpha)</span>
@@ -1006,8 +1110,8 @@ export default function App() {
               <p className="hint">
                 <strong>Grade</strong> enche a largura esquerda→direita. Agrupar mantém a
                 mesma arte junta. Em sob medida a altura cresce até {MAX_AUTO_HEIGHT_CM} cm.
-                Preview usa até {PREVIEW_DPI_CAP} DPI; export reempacota no DPI completo (~
-                {nativeDpi}).
+                Preview usa até {PREVIEW_DPI_CAP} DPI; o export reempacota no DPI
+                escolhido (padrão nativo ~{nativeDpi}).
               </p>
             </details>
           </section>

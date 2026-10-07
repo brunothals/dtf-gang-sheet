@@ -195,6 +195,25 @@ textarea {
   max-width: 11rem;
 }
 
+.folha-tb-export-quality {
+  min-width: 0;
+}
+
+.folha-tb-export-quality .folha-tb-select {
+  max-width: 14.5rem;
+  width: 14.5rem;
+  font-weight: 450;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.folha-export-dpi-hint {
+  margin: -0.15rem 0 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .folha-tb-dpi {
   font-size: 0.72rem;
   font-weight: 650;
