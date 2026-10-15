@@ -27,6 +27,7 @@ import {
   downloadAllSheetsZip,
   downloadSheetPng,
 } from './utils/exportPng'
+import { isPdfFile, loadPdfAsCanvases, PDF_IMPORT_DPI } from './utils/pdfImport'
 import { cmToPx, computeNativeExportDpi, resolveExportDpi, roundPx } from './utils/units'
 import './App.css'
 
@@ -277,14 +278,14 @@ export default function App() {
     const files = all.filter(
       (f) =>
         f.size > 0 &&
-        (f.type === 'image/png' || f.name.toLowerCase().endsWith('.png')),
+        (f.type === 'image/png' || f.name.toLowerCase().endsWith('.png') || isPdfFile(f)),
     )
     const skippedNonPng = all.length - files.length
     if (files.length === 0) {
       setStatus(
         skippedNonPng > 0
-          ? `Nenhum PNG válido (ignorados ${skippedNonPng} não-PNG/vazios).`
-          : 'Nenhum PNG encontrado.',
+          ? `Nenhum PNG/PDF válido (ignorados ${skippedNonPng} outros/vazios).`
+          : 'Nenhum PNG ou PDF encontrado.',
       )
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (folderInputRef.current) folderInputRef.current.value = ''
@@ -297,6 +298,8 @@ export default function App() {
     const largeWarns: string[] = []
     let anyCropped = false
     let skippedDup = 0
+    let pdfPages = 0
+    let pdfCapped = 0
 
     // Chaves já existentes + do lote atual
     const seen = new Set<string>()
@@ -310,6 +313,49 @@ export default function App() {
       const key = artDupKey(file.name, file.size)
       if (skipDuplicateNames && seen.has(key)) {
         skippedDup++
+        continue
+      }
+      if (isPdfFile(file)) {
+        try {
+          const { pages, failures: pf } = await loadPdfAsCanvases(
+            file,
+            PDF_IMPORT_DPI,
+            (pg, total) =>
+              setStatus(`Processando ${i + 1}/${files.length}: ${file.name} (página ${pg}/${total})`),
+          )
+          failures.push(...pf)
+          if (pages.length === 0 && pf.length === 0) {
+            failures.push(`${file.name}: PDF sem páginas`)
+          }
+          for (const pg of pages) {
+            const id = uid()
+            const art = buildArtItem(
+              id,
+              pg.name,
+              pg.canvas,
+              pg.width,
+              pg.height,
+              config.trimEnabled,
+              config.alphaThreshold,
+            )
+            if (
+              config.trimEnabled &&
+              (art.trimmedWidthPx !== art.originalWidthPx ||
+                art.trimmedHeightPx !== art.originalHeightPx)
+            ) {
+              anyCropped = true
+            }
+            if (pg.capped) pdfCapped++
+            pdfPages++
+            next.push(art)
+            artDupKeyByIdRef.current.set(id, `${key}::p${pg.name}`)
+          }
+          if (pages.length > 0) seen.add(key)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          failures.push(`${file.name}: ${msg}`)
+          console.warn('Falha ao importar PDF', file.name, e)
+        }
         continue
       }
       try {
@@ -359,7 +405,13 @@ export default function App() {
       parts.push(`${failures.length} falharam: ${detail}${more}`)
     }
     if (skippedDup > 0) parts.push(`${skippedDup} duplicata(s) ignorada(s)`)
-    if (skippedNonPng > 0) parts.push(`${skippedNonPng} não-PNG/vazio(s)`)
+    if (skippedNonPng > 0) parts.push(`${skippedNonPng} não-PNG/PDF/vazio(s)`)
+    if (pdfPages > 0) {
+      parts.push(
+        `${pdfPages} página(s) de PDF a ${PDF_IMPORT_DPI} DPI (fundo branco do PDF não é removido pelo corte)`,
+      )
+    }
+    if (pdfCapped > 0) parts.push(`${pdfCapped} página(s) reduzida(s) pelo limite de memória`)
     if (anyCropped) parts.push('bordas transparentes cortadas')
     if (largeWarns.length > 0) {
       parts.push(
@@ -760,7 +812,7 @@ export default function App() {
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
           >
-            Importar PNGs
+            Importar PNG/PDF
           </button>
           <button
             type="button"
@@ -879,7 +931,7 @@ export default function App() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,.png"
+          accept="image/png,.png,application/pdf,.pdf"
           multiple
           hidden
           onChange={(e) => e.target.files && void importFiles(e.target.files)}
@@ -887,7 +939,7 @@ export default function App() {
         <input
           ref={folderInputRef}
           type="file"
-          accept="image/png,.png"
+          accept="image/png,.png,application/pdf,.pdf"
           multiple
           hidden
           onChange={(e) => e.target.files && void importFiles(e.target.files)}
@@ -1073,6 +1125,10 @@ export default function App() {
               </label>
             )}
 
+            <p className="hint folha-export-dpi-hint">
+              PDF: cada página vira uma arte ({PDF_IMPORT_DPI} DPI, fundo transparente). PDFs
+              com fundo branco continuam brancos — o corte só remove transparência.
+            </p>
             <p className="hint folha-export-dpi-hint">
               DPI mais baixo = arquivo menor e export mais rápido; resolução cai.
               Preview continua em até {PREVIEW_DPI_CAP} DPI.
