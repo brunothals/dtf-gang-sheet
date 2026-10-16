@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ArtDef, ArtInput, CalcResult, PlaceItem, SavedOrder } from './types'
 import { FOLHAS_PAD, SHEET_WIDTH_CM } from './types'
+import { WA_SHEETS, buildWhatsAppText, loadWaPrices, saveWaPrices } from './whatsapp'
 import {
   artFits,
   bestFit,
@@ -114,6 +115,13 @@ export default function Calculadora() {
   const [saved, setSaved] = useState<SavedOrder[]>(() => getSavedOrders())
   const [savedDetail, setSavedDetail] = useState('')
   const [activeSheetIdx, setActiveSheetIdx] = useState(0)
+  const [waPrices, setWaPrices] = useState<Record<string, string>>(() => loadWaPrices())
+  const setWaPrice = (id: string, v: string) =>
+    setWaPrices((p) => {
+      const next = { ...p, [id]: v }
+      saveWaPrices(next)
+      return next
+    })
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -409,6 +417,18 @@ export default function Calculadora() {
   function calcular() {
     if (mainMode === 'normal') calcularNormal()
     else calcularInverso()
+  }
+
+  const waText = useMemo(() => {
+    if (!result || result.mode !== 'normal' || !result.arts[0]) return ''
+    const a0 = result.arts[0]
+    return buildWhatsAppText(a0.origW, a0.origH, result.esp, result.useRot, waPrices)
+  }, [result, waPrices])
+
+  async function onCopyWhatsApp() {
+    if (!waText) return
+    const ok = await copyText(waText)
+    showToast(ok ? 'Texto p/ cliente copiado' : 'Não foi possível copiar')
   }
 
   async function onCopyOrcamento() {
@@ -946,6 +966,35 @@ export default function Calculadora() {
                     <strong>{s2Preview.placed.length}</strong>
                   </div>
                 </div>
+              )}
+
+              {waText && (
+                <details className="calc-details calc-wa" open>
+                  <summary>Texto p/ cliente (WhatsApp)</summary>
+                  <div className="calc-wa-prices">
+                    {WA_SHEETS.map((s) => (
+                      <label key={s.id} className="calc-wa-price">
+                        <span>{s.w}×{s.h}</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="—"
+                          value={waPrices[s.id] ?? ''}
+                          onChange={(e) => setWaPrice(s.id, e.target.value)}
+                          aria-label={`Preço folha ${s.w}×${s.h} cm`}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <p className="calc-wa-hint">
+                    Preços em R$ (vazio = “—”). Folhas 41 cm só entram no texto com preço.
+                    Base: 1ª arte.
+                  </p>
+                  <pre className="calc-wa-preview">{waText}</pre>
+                  <button type="button" className="btn primary sm" onClick={onCopyWhatsApp}>
+                    Copiar texto p/ cliente
+                  </button>
+                </details>
               )}
 
               {compRows.length > 0 && (

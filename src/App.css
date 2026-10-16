@@ -1113,3 +1113,69 @@ textarea {
 .logout-btn:hover:not(:disabled) {
   opacity: 1;
 }
+
+/* Compacto: sem rolagem lateral em ~1366px */
+@media (min-width: 981px) {
+  .folha-layout {
+    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(270px, 330px);
+  }
+}
+.art-table-wrap {
+  overflow-x: hidden;
+}
+.art-table-compact {
+  table-layout: auto;
+  font-size: 0.74rem;
+}
+.art-table-compact th,
+.art-table-compact td {
+  padding: 0.22rem 0.16rem;
+}
+.art-table-compact .qty,
+.art-table-compact .override {
+  width: 2.6rem;
+  min-width: 0;
+  padding: 0.2rem 0.22rem;
+  font-size: 0.74rem;
+  height: 26px;
+}
+.art-table-compact .thumb {
+  width: 30px;
+  height: 30px;
+}
+.art-cm {
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+.art-table-compact .row-actions {
+  flex-wrap: nowrap;
+  gap: 0.1rem;
+}
+.art-table-compact .row-actions .btn.sm,
+.art-table-compact .rot-cell .btn.sm {
+  padding: 0.15rem 0.28rem;
+  font-size: 0.66rem;
+}
+.folha-options .field span {
+  font-size: 0.66rem;
+}
+.folha-options .field input,
+.folha-options .field select {
+  min-width: 0;
+  width: 100%;
+  font-size: 0.78rem;
+}
+.folha-options .grid-2 {
+  gap: 0.35rem;
+}
+.folha-tb-select {
+  max-width: 9.5rem;
+  font-size: 0.74rem;
+}
+.folha-tb-field input {
+  width: 7.5rem;
+}
+.folha-tb-export-quality .folha-tb-select {
+  width: 11.5rem;
+  max-width: 11.5rem;
+}

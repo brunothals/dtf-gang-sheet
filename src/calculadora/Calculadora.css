@@ -720,3 +720,66 @@
     flex-direction: column;
   }
 }
+
+/* Texto WhatsApp */
+.calc-wa-prices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.25rem;
+}
+.calc-wa-price {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.66rem;
+  color: var(--muted, #9ca3af);
+  min-width: 0;
+}
+.calc-wa-price input {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.3rem;
+  height: 26px;
+  box-sizing: border-box;
+}
+.calc-wa-hint {
+  font-size: 0.68rem;
+  color: var(--muted, #9ca3af);
+  margin: 0 0 0.3rem;
+}
+.calc-wa-preview {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.45rem;
+  margin: 0 0 0.4rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, #333);
+}
+
+/* Compacto: linhas de arte sem rolagem lateral */
+.calc-art-head,
+.calc-art-row {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.5fr) minmax(0, 0.5fr) minmax(0, 0.42fr) minmax(0, 0.7fr) 24px;
+  gap: 0.22rem;
+}
+.calc-art-input {
+  min-width: 0;
+  width: 100%;
+  font-size: 0.76rem;
+  padding: 0.2rem 0.3rem;
+  box-sizing: border-box;
+}
+.calc-table {
+  font-size: 0.74rem;
+}
+.calc-table th,
+.calc-table td {
+  padding: 0.25rem 0.3rem;
+}

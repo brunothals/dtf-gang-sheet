@@ -3,7 +3,6 @@ import { saveAs } from 'file-saver'
 import {
   DEFAULT_CONFIG,
   MAX_AUTO_HEIGHT_CM,
-  SHEET_PRESETS,
   type ArtItem,
   type PackedSheet,
   type PackMode,
@@ -40,6 +39,24 @@ const EXPORT_DPI_FAST = 150
 const PACK_DEBOUNCE_MS = 320
 /** Quantas folhas geram previewUrl de uma vez (resto sob demanda). */
 const MAX_LIVE_PREVIEW_SHEETS = 6
+
+const LENGTH_OPTIONS: [string, string][] = [
+  ['21', '21 cm'],
+  ['42', '42 cm'],
+  ['50', '50 cm'],
+  ['100', '100 cm'],
+  ['auto', 'Completar'],
+  ['custom', 'Personalizado'],
+]
+
+/** Espaço guardado em mm, exibido em cm (0,3 cm = 3 mm). */
+function mmToCmField(mm: number): number {
+  return Math.round((mm / 10) * 100) / 100
+}
+function cmFieldToMm(v: string): number {
+  const n = Number(String(v).replace(',', '.'))
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) / 100 : 0
+}
 
 type ExportQualityPreset = 'native' | 'high' | 'fast' | 'custom'
 
@@ -175,7 +192,8 @@ function LazySheetPreview({
 export default function App() {
 
   const [config, setConfig] = useState<SheetConfig>({ ...DEFAULT_CONFIG })
-  const [presetId, setPresetId] = useState('29x42')
+  /** Comprimento: '21'|'42'|'50'|'100'|'auto' (completar)|'custom' */
+  const [lengthChoice, setLengthChoice] = useState<string>('42')
   const [arts, setArts] = useState<ArtItem[]>([])
   const [sheets, setSheets] = useState<PackedSheet[]>([])
   const [packErrors, setPackErrors] = useState<string[]>([])
@@ -187,7 +205,7 @@ export default function App() {
   /** Prefixo opcional nos arquivos exportados */
   const [clientName, setClientName] = useState('')
   /** Pular PNGs com mesmo nome+tamanho já na lista */
-  const [skipDuplicateNames, setSkipDuplicateNames] = useState(true)
+  const skipDuplicateNames = false
   /** Erro fatal de packing/preview (canvas OOM etc.) */
   const [packFatalError, setPackFatalError] = useState<string | null>(null)
 
@@ -233,19 +251,18 @@ export default function App() {
     setConfig((c) => ({ ...c, [key]: value }))
   }, [])
 
-  const onPresetChange = (id: string) => {
-    setPresetId(id)
-    if (id === 'custom') return
-    const p = SHEET_PRESETS.find((x) => x.id === id)
-    if (p) {
-      setConfig((c) => ({ ...c, widthCm: p.widthCm, heightCm: p.heightCm }))
+  /** Comprimento da folha: preset fixo, completar (sob medida) ou personalizado. */
+  const onLengthChange = (v: string) => {
+    setLengthChoice(v)
+    if (v === 'auto') {
+      setGrowMode('auto_height')
+      return
     }
-  }
-
-  /** Inverte L×A e marca como personalizado (orientação paisagem/retrato). */
-  const rotateSheetOrientation = () => {
-    setPresetId('custom')
-    setConfig((c) => ({ ...c, widthCm: c.heightCm, heightCm: c.widthCm }))
+    setConfig((c) => ({
+      ...c,
+      sheetGrowMode: 'fixed',
+      heightCm: v === 'custom' ? c.heightCm : Number(v),
+    }))
   }
 
   // Reprocessar corte sem reimportar quando trim ou sensibilidade mudam
@@ -864,15 +881,24 @@ export default function App() {
 
         <select
           className="folha-tb-select"
-          value={isAutoHeight ? 'auto_height' : 'fixed'}
-          onChange={(e) =>
-            setGrowMode(e.target.value === 'auto_height' ? 'auto_height' : 'fixed')
-          }
-          title="Tipo de folha"
-          aria-label="Tipo de folha"
+          value={config.widthCm === 41 ? '41' : '29'}
+          onChange={(e) => updateConfig('widthCm', Number(e.target.value))}
+          title="Largura da folha"
+          aria-label="Largura da folha"
         >
-          <option value="fixed">Folha fixa</option>
-          <option value="auto_height">Sob medida / rolo</option>
+          <option value="29">29 cm</option>
+          <option value="41">41 cm</option>
+        </select>
+        <select
+          className="folha-tb-select"
+          value={lengthChoice}
+          onChange={(e) => onLengthChange(e.target.value)}
+          title="Comprimento da folha"
+          aria-label="Comprimento da folha"
+        >
+          {LENGTH_OPTIONS.map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
         </select>
 
         <label className="folha-tb-field folha-tb-export-quality">
@@ -955,93 +981,58 @@ export default function App() {
               <h2>Folha</h2>
             </div>
 
-            <label className="field">
-              <span>Preset</span>
-              <select value={presetId} onChange={(e) => onPresetChange(e.target.value)}>
-                {(['Mercado Livre', 'Rolo DTF', 'Papel', 'Outro'] as const).map((group) => {
-                  const items = SHEET_PRESETS.filter((p) => (p.group ?? 'Outro') === group)
-                  if (items.length === 0) return null
-                  return (
-                    <optgroup key={group} label={group}>
-                      {items.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )
-                })}
-              </select>
-            </label>
-
             <div className="grid-2">
               <label className="field">
-                <span>Largura (cm)</span>
+                <span>Largura</span>
+                <select
+                  value={config.widthCm === 41 ? '41' : '29'}
+                  onChange={(e) => updateConfig('widthCm', Number(e.target.value))}
+                >
+                  <option value="29">29 cm</option>
+                  <option value="41">41 cm</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Comprimento</span>
+                <select value={lengthChoice} onChange={(e) => onLengthChange(e.target.value)}>
+                  {LENGTH_OPTIONS.map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {lengthChoice === 'custom' && (
+              <label className="field">
+                <span>Compr. (cm)</span>
                 <input
                   type="number"
                   min={1}
                   step={0.1}
-                  value={config.widthCm}
-                  disabled={presetId !== 'custom'}
-                  onChange={(e) => {
-                    setPresetId('custom')
-                    updateConfig('widthCm', Number(e.target.value) || 1)
-                  }}
+                  value={config.heightCm}
+                  onChange={(e) => updateConfig('heightCm', Number(e.target.value) || 1)}
                 />
               </label>
-              <label className="field">
-                <span>{isAutoHeight ? 'Altura' : 'Altura (cm)'}</span>
-                {isAutoHeight ? (
-                  <div className="dpi-readout">até {MAX_AUTO_HEIGHT_CM} cm</div>
-                ) : (
-                  <input
-                    type="number"
-                    min={1}
-                    step={0.1}
-                    value={config.heightCm}
-                    disabled={presetId !== 'custom'}
-                    onChange={(e) => {
-                      setPresetId('custom')
-                      updateConfig('heightCm', Number(e.target.value) || 1)
-                    }}
-                  />
-                )}
-              </label>
-            </div>
-
-            <button
-              type="button"
-              className="btn secondary sm folha-full-btn"
-              onClick={rotateSheetOrientation}
-            >
-              Girar orientação (L×A)
-            </button>
+            )}
+            {isAutoHeight && (
+              <div className="dpi-readout">Completar: cresce até {MAX_AUTO_HEIGHT_CM} cm</div>
+            )}
 
             <div className="grid-2">
-              <label className="field">
-                <span>Margem (mm)</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={config.marginMm}
-                  onChange={(e) => updateConfig('marginMm', Number(e.target.value) || 0)}
-                />
-              </label>
               {config.packMode === 'maxrects' ? (
                 <label className="field">
-                  <span>Gap (mm)</span>
+                  <span>Espaço (cm)</span>
                   <input
                     type="number"
                     min={0}
-                    step={0.5}
-                    value={config.gapMm}
-                    onChange={(e) => updateConfig('gapMm', Number(e.target.value) || 0)}
+                    step={0.1}
+                    value={mmToCmField(config.gapMm)}
+                    onChange={(e) => updateConfig('gapMm', cmFieldToMm(e.target.value))}
                   />
                 </label>
               ) : (
                 <label className="field">
-                  <span>Lado maior (cm)</span>
+                  <span>Lado (cm)</span>
                   <input
                     type="number"
                     min={0.1}
@@ -1058,23 +1049,23 @@ export default function App() {
               config.packMode === 'group_cols') && (
               <div className="grid-2">
                 <label className="field">
-                  <span>Gap X (mm)</span>
+                  <span>Espaço H (cm)</span>
                   <input
                     type="number"
                     min={0}
-                    step={0.5}
-                    value={config.gapXMm}
-                    onChange={(e) => updateConfig('gapXMm', Number(e.target.value) || 0)}
+                    step={0.1}
+                    value={mmToCmField(config.gapXMm)}
+                    onChange={(e) => updateConfig('gapXMm', cmFieldToMm(e.target.value))}
                   />
                 </label>
                 <label className="field">
-                  <span>Gap Y (mm)</span>
+                  <span>Espaço V (cm)</span>
                   <input
                     type="number"
                     min={0}
-                    step={0.5}
-                    value={config.gapYMm}
-                    onChange={(e) => updateConfig('gapYMm', Number(e.target.value) || 0)}
+                    step={0.1}
+                    value={mmToCmField(config.gapYMm)}
+                    onChange={(e) => updateConfig('gapYMm', cmFieldToMm(e.target.value))}
                   />
                 </label>
               </div>
@@ -1082,7 +1073,7 @@ export default function App() {
 
             {config.packMode === 'maxrects' && (
               <label className="field">
-                <span>Lado maior (cm)</span>
+                <span>Lado (cm)</span>
                 <input
                   type="number"
                   min={0.1}
@@ -1152,14 +1143,6 @@ export default function App() {
               />
             </label>
 
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={skipDuplicateNames}
-                onChange={(e) => setSkipDuplicateNames(e.target.checked)}
-              />
-              <span>Ignorar duplicatas</span>
-            </label>
 
             <details className="folha-hints">
               <summary>Dicas de montagem</summary>
@@ -1322,7 +1305,7 @@ export default function App() {
               <div className="empty-state">
                 <p className="empty-state-title">Nenhuma arte</p>
                 <p className="empty-state-desc">
-                  Use Importar PNGs ou Pasta na barra superior.
+                  Use Importar PNG/PDF ou Pasta na barra superior.
                 </p>
               </div>
             ) : (

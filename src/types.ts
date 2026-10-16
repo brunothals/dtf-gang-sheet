@@ -142,10 +142,10 @@ export const SHEET_PRESETS: SheetPreset[] = [
 export const DEFAULT_CONFIG: SheetConfig = {
   widthCm: 29,
   heightCm: 42,
-  marginMm: 5,
+  marginMm: 0,
   gapMm: 3,
-  gapXMm: 1,
-  gapYMm: 1,
+  gapXMm: 3,
+  gapYMm: 3,
   allowRotation: false,
   packMode: 'maxrects',
   dpi: 300,
