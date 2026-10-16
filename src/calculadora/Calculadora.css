@@ -783,3 +783,25 @@
 .calc-table td {
   padding: 0.25rem 0.3rem;
 }
+
+/* Quantas cabem */
+.calc-fit-wrap {
+  margin: 0.45rem 0;
+  overflow-x: hidden;
+}
+.calc-fit-table {
+  width: 100%;
+}
+.calc-fit-table tbody tr {
+  cursor: pointer;
+}
+.calc-fit-table tbody tr:hover td {
+  background: rgba(167, 139, 250, 0.08);
+}
+.calc-fit-table tr.sel td {
+  background: rgba(167, 139, 250, 0.18);
+}
+.calc-fit-table tr.best td:last-child {
+  color: #22c55e;
+  font-weight: 650;
+}

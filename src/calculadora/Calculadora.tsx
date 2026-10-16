@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ArtDef, ArtInput, CalcResult, PlaceItem, SavedOrder } from './types'
 import { FOLHAS_PAD, SHEET_WIDTH_CM } from './types'
-import { WA_SHEETS, buildWhatsAppText, loadWaPrices, saveWaPrices } from './whatsapp'
+import { WA_SHEETS, brl, parseBRL, buildWhatsAppText, loadWaPrices, saveWaPrices } from './whatsapp'
 import {
   artFits,
   bestFit,
@@ -68,9 +68,9 @@ export default function Calculadora() {
   const [clientName, setClientName] = useState('')
   const [saleAd, setSaleAd] = useState('')
   const [mainMode, setMainMode] = useState<MainMode>('normal')
-  const [normalSub, setNormalSub] = useState<NormalSub>('multi')
+  const [normalSub, setNormalSub] = useState<NormalSub>('fill')
 
-  const [folhaSel, setFolhaSel] = useState('29x42')
+  const [folhaSel, setFolhaSel] = useState('29x21')
   const [fhCustom, setFhCustom] = useState(60)
   const [esp, setEsp] = useState(0.3)
   const [useRot, setUseRot] = useState(true)
@@ -419,11 +419,51 @@ export default function Calculadora() {
     else calcularInverso()
   }
 
+  const fillMode = mainMode === 'normal' && normalSub === 'fill'
+
+  /** Quantas cabem: todas as folhas de uma vez (margem 0, espaço H/V, 0°/90°). */
+  const fitRows = useMemo(() => {
+    const aw = Number(fillW)
+    const ah = Number(fillH)
+    if (!fillMode || !(aw > 0 && ah > 0)) return []
+    const rows = WA_SHEETS.map((s) => {
+      const bf = bestFit(aw, ah, s.w, s.h, Number(esp) || 0, useRot)
+      const price = parseBRL(waPrices[s.id])
+      return {
+        ...s,
+        qty: bf.total,
+        rotated: bf.rotated,
+        price,
+        unit: price != null && bf.total > 0 ? price / bf.total : null,
+        best: false,
+      }
+    })
+    const units = rows.filter((r) => r.unit != null).map((r) => r.unit as number)
+    const minU = units.length ? Math.min(...units) : null
+    return rows.map((r) => ({ ...r, best: minU != null && r.unit === minU }))
+  }, [fillMode, fillW, fillH, esp, useRot, waPrices])
+
+  // Modo "Quantas cabem": recalcula preview automaticamente (sem botão / sem qtd)
+  useEffect(() => {
+    if (!fillMode) return
+    const aw = Number(fillW)
+    const ah = Number(fillH)
+    if (!(aw > 0 && ah > 0)) return
+    calcularNormal()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fillMode, fillW, fillH, esp, useRot, folhaSel, fhCustom, fillColor, fillName])
+
   const waText = useMemo(() => {
+    if (fillMode) {
+      const aw = Number(fillW)
+      const ah = Number(fillH)
+      if (!(aw > 0 && ah > 0)) return ''
+      return buildWhatsAppText(aw, ah, Number(esp) || 0, useRot, waPrices)
+    }
     if (!result || result.mode !== 'normal' || !result.arts[0]) return ''
     const a0 = result.arts[0]
     return buildWhatsAppText(a0.origW, a0.origH, result.esp, result.useRot, waPrices)
-  }, [result, waPrices])
+  }, [fillMode, fillW, fillH, esp, useRot, result, waPrices])
 
   async function onCopyWhatsApp() {
     if (!waText) return
@@ -563,6 +603,10 @@ export default function Calculadora() {
                       <option value="29x42">29×42</option>
                       <option value="29x50">29×50</option>
                       <option value="29x100">29×100</option>
+                      <option value="41x21">41×21</option>
+                      <option value="41x42">41×42</option>
+                      <option value="41x50">41×50</option>
+                      <option value="41x100">41×100</option>
                       <option value="custom">Custom</option>
                     </select>
                   </label>
@@ -603,18 +647,18 @@ export default function Calculadora() {
                     className={`calc-subtab ${normalSub === 'fill' ? 'on' : ''}`}
                     onClick={() => setNormalSub('fill')}
                   >
-                    Preencher folha
+                    Quantas cabem
                   </button>
                   <button
                     type="button"
                     className={`calc-subtab ${normalSub === 'multi' ? 'on' : ''}`}
                     onClick={() => setNormalSub('multi')}
                   >
-                    Múltiplas artes
+                    Várias artes (c/ qtd)
                   </button>
                 </div>
 
-                {normalSub === 'fill' ? (
+                {normalSub === 'fill' && (
                   <div className="calc-fill-row">
                     <label className="field">
                       <span>L cm</span>
@@ -655,7 +699,44 @@ export default function Calculadora() {
                       />
                     </label>
                   </div>
-                ) : (
+                )}
+                {normalSub === 'fill' && fitRows.length > 0 && (
+                  <div className="calc-table-wrap calc-fit-wrap">
+                    <table className="calc-table calc-fit-table">
+                      <thead>
+                        <tr>
+                          <th>Folha</th>
+                          <th>Cabem</th>
+                          <th>Preço</th>
+                          <th>R$/un</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fitRows.map((r) => (
+                          <tr
+                            key={r.id}
+                            className={`${r.id === folhaSel ? 'sel' : ''}${r.best ? ' best' : ''}`}
+                            onClick={() => setFolhaSel(r.id)}
+                            title="Ver preview desta folha"
+                          >
+                            <td>
+                              {r.w}×{r.h}
+                              {r.rotated ? ' ↻' : ''}
+                            </td>
+                            <td><strong>{r.qty}</strong></td>
+                            <td>{r.price != null ? brl(r.price) : '—'}</td>
+                            <td>{r.unit != null ? brl(r.unit) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="calc-wa-hint">
+                      Margem 0 · espaço {String(esp).replace('.', ',')} cm H/V · testa 0° e 90°
+                      {useRot ? '' : ' (rotação desligada)'}. Clique numa folha p/ preview.
+                    </p>
+                  </div>
+                )}
+                {normalSub === 'multi' && (
                   <>
                     <ArtRows
                       arts={arts}
